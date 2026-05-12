@@ -14,6 +14,10 @@ actor LiveTranscriptCleaner {
 
     /// Hardcoded cheap model for cleanup (keeps cost low).
     private let cleanupModel = "openai/gpt-4o-mini"
+    /// Default Databricks serving endpoint to use for cleanup. Cleanup is a
+    /// short, low-stakes call so we pick a smaller model. Falls back to the
+    /// user's primary Databricks model if this name is missing in their workspace.
+    private let databricksCleanupModel = "databricks-meta-llama-3-3-70b-instruct"
     private let minimumWordCount = 5
 
     private let systemPrompt = """
@@ -104,6 +108,10 @@ actor LiveTranscriptCleaner {
         let openAILLMURL = await MainActor.run { settings.openAILLMBaseURL }
         let openAILLMKey = await MainActor.run { settings.openAILLMApiKey }
         let openAILLMModelName = await MainActor.run { settings.openAILLMModel }
+        let databricksWorkspace = await MainActor.run { settings.databricksWorkspaceURL }
+        let databricksClientID = await MainActor.run { settings.databricksClientID }
+        let databricksClientSecret = await MainActor.run { settings.databricksClientSecret }
+        let databricksModel = await MainActor.run { settings.databricksLLMModel }
 
         switch provider {
         case .openRouter:
@@ -134,6 +142,26 @@ actor LiveTranscriptCleaner {
             }
             baseURL = url
             model = openAILLMModelName
+        case .databricks:
+            guard let url = DatabricksAuth.chatCompletionsURL(for: databricksWorkspace) else {
+                await markFailed(utterance.id)
+                return
+            }
+            let credentials = DatabricksAuth.Credentials(
+                workspaceHost: databricksWorkspace,
+                clientID: databricksClientID,
+                clientSecret: databricksClientSecret
+            )
+            do {
+                apiKey = try await DatabricksAuth.shared.token(for: credentials)
+            } catch {
+                await markFailed(utterance.id)
+                return
+            }
+            baseURL = url
+            // Prefer a small/cheap default for line-by-line cleanup; fall back
+            // to the user's primary serving endpoint if they only have one.
+            model = databricksModel.isEmpty ? databricksCleanupModel : databricksModel
         }
 
         let messages: [OpenRouterClient.Message] = [

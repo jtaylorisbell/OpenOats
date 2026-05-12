@@ -297,6 +297,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
     case ollama
     case mlx
     case openAICompatible
+    case databricks
 
     var id: String { rawValue }
 
@@ -306,6 +307,7 @@ enum LLMProvider: String, CaseIterable, Identifiable {
         case .ollama: "Ollama"
         case .mlx: "MLX"
         case .openAICompatible: "OpenAI Compatible"
+        case .databricks: "Databricks Foundation Models"
         }
     }
 }

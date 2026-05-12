@@ -77,17 +77,19 @@ final class NotesEngine {
             break
         }
 
-        let apiKey: String?
+        let staticApiKey: String?
         let baseURL: URL?
         let model: String
+        let databricksCredentials: DatabricksAuth.Credentials?
 
         switch settings.llmProvider {
         case .openRouter:
-            apiKey = settings.openRouterApiKey.isEmpty ? nil : settings.openRouterApiKey
+            staticApiKey = settings.openRouterApiKey.isEmpty ? nil : settings.openRouterApiKey
             baseURL = nil
             model = settings.selectedModel
+            databricksCredentials = nil
         case .ollama:
-            apiKey = nil
+            staticApiKey = nil
             guard let ollamaURL = OpenRouterClient.chatCompletionsURL(from: settings.ollamaBaseURL) else {
                 error = "Invalid Ollama URL: \(settings.ollamaBaseURL)"
                 isGenerating = false
@@ -96,8 +98,9 @@ final class NotesEngine {
             }
             baseURL = ollamaURL
             model = settings.ollamaLLMModel
+            databricksCredentials = nil
         case .mlx:
-            apiKey = nil
+            staticApiKey = nil
             guard let mlxURL = OpenRouterClient.chatCompletionsURL(from: settings.mlxBaseURL) else {
                 error = "Invalid MLX URL: \(settings.mlxBaseURL)"
                 isGenerating = false
@@ -106,8 +109,9 @@ final class NotesEngine {
             }
             baseURL = mlxURL
             model = settings.mlxModel
+            databricksCredentials = nil
         case .openAICompatible:
-            apiKey = settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
+            staticApiKey = settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
             guard let openAIURL = OpenRouterClient.chatCompletionsURL(from: settings.openAILLMBaseURL) else {
                 error = "Invalid OpenAI Compatible URL: \(settings.openAILLMBaseURL)"
                 isGenerating = false
@@ -116,6 +120,22 @@ final class NotesEngine {
             }
             baseURL = openAIURL
             model = settings.openAILLMModel
+            databricksCredentials = nil
+        case .databricks:
+            guard let databricksURL = DatabricksAuth.chatCompletionsURL(for: settings.databricksWorkspaceURL) else {
+                error = "Invalid Databricks workspace URL: \(settings.databricksWorkspaceURL)"
+                isGenerating = false
+                onFinished()
+                return
+            }
+            staticApiKey = nil
+            baseURL = databricksURL
+            model = settings.databricksLLMModel
+            databricksCredentials = DatabricksAuth.Credentials(
+                workspaceHost: settings.databricksWorkspaceURL,
+                clientID: settings.databricksClientID,
+                clientSecret: settings.databricksClientSecret
+            )
         }
 
         let includeCalendarContext = Self.shouldIncludeCalendarContext(
@@ -139,6 +159,21 @@ final class NotesEngine {
         ]
 
         let task = Task { [weak self] in
+            let apiKey: String?
+            if let databricksCredentials {
+                do {
+                    apiKey = try await DatabricksAuth.shared.token(for: databricksCredentials)
+                } catch {
+                    await MainActor.run {
+                        self?.error = error.localizedDescription
+                        self?.isGenerating = false
+                        onFinished()
+                    }
+                    return
+                }
+            } else {
+                apiKey = staticApiKey
+            }
             do {
                 let stream = await self?.client.streamCompletion(
                     apiKey: apiKey,
@@ -228,7 +263,7 @@ final class NotesEngine {
         switch provider {
         case .ollama, .mlx:
             return true
-        case .openRouter:
+        case .openRouter, .databricks:
             return allowCloudCalendarContext
         case .openAICompatible:
             if let baseURL, OpenRouterClient.isLocalHost(baseURL) {

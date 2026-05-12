@@ -174,7 +174,7 @@ final class SuggestionEngine {
 
         do {
             let response = try await client.complete(
-                apiKey: llmApiKey,
+                apiKey: try await resolveLLMApiKey(),
                 model: activePrimaryModel,
                 messages: statePrompt,
                 maxTokens: 512,
@@ -224,6 +224,10 @@ final class SuggestionEngine {
             guard !settings.openRouterApiKey.isEmpty else { return }
         case .ollama, .mlx, .openAICompatible:
             guard llmBaseURL(forRealtime: true) != nil else { return }
+        case .databricks:
+            guard llmBaseURL(forRealtime: true) != nil,
+                  !settings.databricksClientID.isEmpty,
+                  !settings.databricksClientSecret.isEmpty else { return }
         }
 
         triggerBackgroundStateUpdate()
@@ -381,8 +385,16 @@ final class SuggestionEngine {
         )
 
         do {
+            let apiKey: String?
+            do {
+                apiKey = try await resolveLLMApiKey()
+            } catch {
+                Log.suggestionEngine.error("Failed to resolve LLM credentials: \(error, privacy: .public)")
+                markSuperseded(suggestionID)
+                return
+            }
             let stream = await client.streamCompletion(
-                apiKey: llmApiKey,
+                apiKey: apiKey,
                 model: settings.activeRealtimeModel,
                 messages: messages,
                 maxTokens: 200,
@@ -499,16 +511,28 @@ final class SuggestionEngine {
         case .ollama: settings.ollamaLLMModel
         case .mlx: settings.mlxModel
         case .openAICompatible: settings.openAILLMModel
+        case .databricks: settings.databricksLLMModel
         }
     }
 
-    private var llmApiKey: String? {
+    /// Resolves the bearer token for the active provider. For Databricks this
+    /// performs an M2M OAuth exchange; the token store caches results so most
+    /// calls are in-memory.
+    private func resolveLLMApiKey() async throws -> String? {
         switch settings.llmProvider {
-        case .openRouter: settings.openRouterApiKey
-        case .ollama: nil
-        case .mlx: nil
+        case .openRouter:
+            return settings.openRouterApiKey
+        case .ollama, .mlx:
+            return nil
         case .openAICompatible:
-            settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
+            return settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
+        case .databricks:
+            let credentials = DatabricksAuth.Credentials(
+                workspaceHost: settings.databricksWorkspaceURL,
+                clientID: settings.databricksClientID,
+                clientSecret: settings.databricksClientSecret
+            )
+            return try await DatabricksAuth.shared.token(for: credentials)
         }
     }
 
@@ -521,6 +545,8 @@ final class SuggestionEngine {
             return OpenRouterClient.chatCompletionsURL(from: settings.mlxBaseURL)
         case .openAICompatible:
             return OpenRouterClient.chatCompletionsURL(from: settings.openAILLMBaseURL)
+        case .databricks:
+            return DatabricksAuth.chatCompletionsURL(for: settings.databricksWorkspaceURL)
         }
     }
 

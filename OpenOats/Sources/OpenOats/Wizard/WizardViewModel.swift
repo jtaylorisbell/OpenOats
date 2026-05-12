@@ -491,6 +491,10 @@ final class WizardViewModel {
         switch settings.llmProvider {
         case .openRouter:
             hasConfiguredLLM = !settings.openRouterApiKey.isEmpty
+        case .databricks:
+            hasConfiguredLLM = !settings.databricksClientID.isEmpty
+                && !settings.databricksClientSecret.isEmpty
+                && !settings.databricksWorkspaceURL.isEmpty
         case .ollama, .mlx, .openAICompatible:
             hasConfiguredLLM = true
         }
@@ -509,7 +513,7 @@ final class WizardViewModel {
         switch settings.llmProvider {
         case .ollama:
             privacy = .local
-        case .openRouter, .mlx, .openAICompatible:
+        case .openRouter, .mlx, .openAICompatible, .databricks:
             privacy = .cloud
         }
     }

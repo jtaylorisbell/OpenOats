@@ -198,6 +198,7 @@ actor OpenRouterClient {
             case .httpError(let code, let host):
                 let provider = switch host {
                 case let h? where h.contains("openrouter.ai"): "OpenRouter"
+                case let h? where h.contains("databricks"): "Databricks"
                 case let h? where h.contains("localhost"), let h? where h.contains("127.0.0.1"): "Local LLM"
                 case let h?: h
                 case nil: "LLM"
@@ -206,6 +207,7 @@ actor OpenRouterClient {
             case .missingAPIKey(let host):
                 let provider = switch host {
                 case let h? where h.contains("openrouter.ai"): "OpenRouter"
+                case let h? where h.contains("databricks"): "Databricks"
                 case let h?: h
                 case nil: "LLM"
                 }

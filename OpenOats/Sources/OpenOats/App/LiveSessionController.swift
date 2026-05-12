@@ -1178,6 +1178,7 @@ final class LiveSessionController {
         case .ollama: settings.ollamaLLMModel
         case .mlx: settings.mlxModel
         case .openAICompatible: settings.openAILLMModel
+        case .databricks: settings.databricksLLMModel
         }
 
         let sidebarSuggestions: [Suggestion]

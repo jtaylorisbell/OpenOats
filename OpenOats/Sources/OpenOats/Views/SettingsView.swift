@@ -708,6 +708,30 @@ private struct IntelligenceSettingsTab: View {
 
                         TextField("Model", text: $settings.openAILLMModel, prompt: Text("e.g. gpt-4o-mini"))
                             .font(.system(size: 12, design: .monospaced))
+                    case .databricks:
+                        TextField(
+                            "Workspace URL",
+                            text: $settings.databricksWorkspaceURL,
+                            prompt: Text("https://your-workspace.cloud.databricks.com")
+                        )
+                        .font(.system(size: 12, design: .monospaced))
+
+                        SecureField("Client ID", text: $settings.databricksClientID)
+                            .font(.system(size: 12, design: .monospaced))
+
+                        SecureField("Client Secret", text: $settings.databricksClientSecret)
+                            .font(.system(size: 12, design: .monospaced))
+
+                        TextField(
+                            "Serving endpoint",
+                            text: $settings.databricksLLMModel,
+                            prompt: Text("e.g. databricks-meta-llama-3-3-70b-instruct")
+                        )
+                        .font(.system(size: 12, design: .monospaced))
+
+                        Text("Authenticates via OAuth machine-to-machine using a service principal's client ID and secret. Create one under your workspace's Service Principals settings and grant it access to the serving endpoint.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -801,7 +825,7 @@ private struct IntelligenceSettingsTab: View {
                         Text("Optional Ollama model for real-time suggestions. Uses your main model if empty.")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
-                    case .mlx, .openAICompatible:
+                    case .mlx, .openAICompatible, .databricks:
                         Text("Real-time suggestions currently reuse the active provider model for this provider.")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)

@@ -92,6 +92,26 @@ final class BatchTextCleaner {
             }
             baseURL = openAIURL
             model = settings.openAILLMModel
+        case .databricks:
+            guard let databricksURL = DatabricksAuth.chatCompletionsURL(for: settings.databricksWorkspaceURL) else {
+                error = "Invalid Databricks workspace URL: \(settings.databricksWorkspaceURL)"
+                isCleaningUp = false
+                return records
+            }
+            baseURL = databricksURL
+            model = settings.databricksLLMModel
+            let credentials = DatabricksAuth.Credentials(
+                workspaceHost: settings.databricksWorkspaceURL,
+                clientID: settings.databricksClientID,
+                clientSecret: settings.databricksClientSecret
+            )
+            do {
+                apiKey = try await DatabricksAuth.shared.token(for: credentials)
+            } catch {
+                self.error = error.localizedDescription
+                isCleaningUp = false
+                return records
+            }
         }
 
         let chunks = Self.chunkRecords(records)

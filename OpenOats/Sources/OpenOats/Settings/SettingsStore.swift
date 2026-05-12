@@ -207,6 +207,66 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - Databricks Foundation Model APIs
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksWorkspaceURL: String
+    var databricksWorkspaceURL: String {
+        get { access(keyPath: \.databricksWorkspaceURL); return _databricksWorkspaceURL }
+        set {
+            withMutation(keyPath: \.databricksWorkspaceURL) {
+                _databricksWorkspaceURL = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                defaults.set(_databricksWorkspaceURL, forKey: "databricksWorkspaceURL")
+            }
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksClientID: String
+    var databricksClientID: String {
+        get {
+            access(keyPath: \.databricksClientID)
+            return loadSecretIfNeeded(key: "databricksClientID", currentValue: _databricksClientID) {
+                _databricksClientID = $0
+            }
+        }
+        set {
+            withMutation(keyPath: \.databricksClientID) {
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                _databricksClientID = trimmed
+                markSecretLoaded("databricksClientID")
+                secretStore.save(key: "databricksClientID", value: trimmed)
+            }
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksClientSecret: String
+    var databricksClientSecret: String {
+        get {
+            access(keyPath: \.databricksClientSecret)
+            return loadSecretIfNeeded(key: "databricksClientSecret", currentValue: _databricksClientSecret) {
+                _databricksClientSecret = $0
+            }
+        }
+        set {
+            withMutation(keyPath: \.databricksClientSecret) {
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                _databricksClientSecret = trimmed
+                markSecretLoaded("databricksClientSecret")
+                secretStore.save(key: "databricksClientSecret", value: trimmed)
+            }
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksLLMModel: String
+    var databricksLLMModel: String {
+        get { access(keyPath: \.databricksLLMModel); return _databricksLLMModel }
+        set {
+            withMutation(keyPath: \.databricksLLMModel) {
+                _databricksLLMModel = newValue
+                defaults.set(newValue, forKey: "databricksLLMModel")
+            }
+        }
+    }
+
     @ObservationIgnored nonisolated(unsafe) private var _openAIEmbedBaseURL: String
     var openAIEmbedBaseURL: String {
         get { access(keyPath: \.openAIEmbedBaseURL); return _openAIEmbedBaseURL }
@@ -1196,6 +1256,10 @@ final class SettingsStore {
         self._openAILLMBaseURL = defaults.string(forKey: "openAILLMBaseURL") ?? "http://localhost:4000"
         self._openAILLMApiKey = ""
         self._openAILLMModel = defaults.string(forKey: "openAILLMModel") ?? ""
+        self._databricksWorkspaceURL = defaults.string(forKey: "databricksWorkspaceURL") ?? ""
+        self._databricksClientID = ""
+        self._databricksClientSecret = ""
+        self._databricksLLMModel = defaults.string(forKey: "databricksLLMModel") ?? "databricks-meta-llama-3-3-70b-instruct"
         self._openAIEmbedBaseURL = defaults.string(forKey: "openAIEmbedBaseURL") ?? "http://localhost:8080"
         self._openAIEmbedApiKey = ""
         self._openAIEmbedModel = defaults.string(forKey: "openAIEmbedModel") ?? "text-embedding-3-small"
@@ -1390,6 +1454,7 @@ final class SettingsStore {
         case .ollama: raw = ollamaLLMModel
         case .mlx: raw = mlxModel
         case .openAICompatible: raw = openAILLMModel
+        case .databricks: raw = databricksLLMModel
         }
         return raw.split(separator: "/").last.map(String.init) ?? raw
     }
@@ -1401,6 +1466,7 @@ final class SettingsStore {
         case .ollama: return realtimeOllamaModel.isEmpty ? ollamaLLMModel : realtimeOllamaModel
         case .mlx: return mlxModel
         case .openAICompatible: return openAILLMModel
+        case .databricks: return databricksLLMModel
         }
     }
 

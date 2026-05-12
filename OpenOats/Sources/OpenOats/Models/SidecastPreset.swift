@@ -93,7 +93,7 @@ struct SidecastPreset: Decodable {
                     settings.openRouterApiKey = apiKey
                 case .openAICompatible:
                     settings.openAILLMApiKey = apiKey
-                case .ollama, .mlx:
+                case .ollama, .mlx, .databricks:
                     break
                 }
             }
@@ -104,6 +104,8 @@ struct SidecastPreset: Decodable {
                     settings.ollamaBaseURL = baseURL
                 case .openAICompatible:
                     settings.openAILLMBaseURL = baseURL
+                case .databricks:
+                    settings.databricksWorkspaceURL = baseURL
                 case .openRouter, .mlx:
                     break
                 }
@@ -119,6 +121,8 @@ struct SidecastPreset: Decodable {
                     settings.openAILLMModel = model
                 case .mlx:
                     settings.mlxModel = model
+                case .databricks:
+                    settings.databricksLLMModel = model
                 }
             }
         }

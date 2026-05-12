@@ -22,11 +22,12 @@ final class AppSettingsTests: XCTestCase {
 
     func testLLMProviderAllCases() {
         let cases = LLMProvider.allCases
-        XCTAssertEqual(cases.count, 4)
+        XCTAssertEqual(cases.count, 5)
         XCTAssertTrue(cases.contains(.openRouter))
         XCTAssertTrue(cases.contains(.ollama))
         XCTAssertTrue(cases.contains(.openAICompatible))
         XCTAssertTrue(cases.contains(.mlx))
+        XCTAssertTrue(cases.contains(.databricks))
     }
 
     func testLLMProviderDisplayNames() {
@@ -34,6 +35,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(LLMProvider.ollama.displayName, "Ollama")
         XCTAssertEqual(LLMProvider.openAICompatible.displayName, "OpenAI Compatible")
         XCTAssertEqual(LLMProvider.mlx.displayName, "MLX")
+        XCTAssertEqual(LLMProvider.databricks.displayName, "Databricks Foundation Models")
     }
 
     func testLLMProviderRawValues() {
@@ -41,6 +43,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(LLMProvider.ollama.rawValue, "ollama")
         XCTAssertEqual(LLMProvider.openAICompatible.rawValue, "openAICompatible")
         XCTAssertEqual(LLMProvider.mlx.rawValue, "mlx")
+        XCTAssertEqual(LLMProvider.databricks.rawValue, "databricks")
     }
 
     func testLLMProviderIdentifiable() {

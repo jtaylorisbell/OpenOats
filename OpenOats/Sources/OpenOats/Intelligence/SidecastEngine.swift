@@ -78,8 +78,9 @@ final class SidecastEngine {
 
             do {
                 let useWebSearch = self.shouldUseWebSearch(for: personas)
+                let apiKey = try await self.resolveLLMApiKey()
                 let response = try await self.client.complete(
-                    apiKey: self.llmApiKey,
+                    apiKey: apiKey,
                     model: self.settings.activeRealtimeModel,
                     messages: prompt,
                     maxTokens: self.settings.sidecastMaxTokens,
@@ -374,16 +375,28 @@ final class SidecastEngine {
             return !settings.openRouterApiKey.isEmpty
         case .ollama, .mlx, .openAICompatible:
             return llmBaseURL != nil
+        case .databricks:
+            return llmBaseURL != nil
+                && !settings.databricksClientID.isEmpty
+                && !settings.databricksClientSecret.isEmpty
         }
     }
 
-    private var llmApiKey: String? {
+    /// Resolves the bearer token for the active provider. Databricks fetches
+    /// a cached / refreshed M2M token; other providers return their stored key.
+    private func resolveLLMApiKey() async throws -> String? {
         switch settings.llmProvider {
-        case .openRouter: settings.openRouterApiKey
-        case .ollama: nil
-        case .mlx: nil
+        case .openRouter: return settings.openRouterApiKey
+        case .ollama, .mlx: return nil
         case .openAICompatible:
-            settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
+            return settings.openAILLMApiKey.isEmpty ? nil : settings.openAILLMApiKey
+        case .databricks:
+            let credentials = DatabricksAuth.Credentials(
+                workspaceHost: settings.databricksWorkspaceURL,
+                clientID: settings.databricksClientID,
+                clientSecret: settings.databricksClientSecret
+            )
+            return try await DatabricksAuth.shared.token(for: credentials)
         }
     }
 
@@ -401,6 +414,8 @@ final class SidecastEngine {
             OpenRouterClient.chatCompletionsURL(from: settings.mlxBaseURL)
         case .openAICompatible:
             OpenRouterClient.chatCompletionsURL(from: settings.openAILLMBaseURL)
+        case .databricks:
+            DatabricksAuth.chatCompletionsURL(for: settings.databricksWorkspaceURL)
         }
     }
 }
