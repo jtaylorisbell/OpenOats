@@ -795,6 +795,23 @@ private struct IntelligenceSettingsTab: View {
 
                             TextField("Model", text: $settings.openAIEmbedModel, prompt: Text("e.g. text-embedding-3-small"))
                                 .font(.system(size: 12, design: .monospaced))
+                        case .databricks:
+                            TextField(
+                                "Embedding endpoint",
+                                text: $settings.databricksEmbedModel,
+                                prompt: Text("e.g. databricks-bge-large-en")
+                            )
+                            .font(.system(size: 12, design: .monospaced))
+
+                            if settings.llmProvider == .databricks {
+                                Text("Reuses the workspace URL and OAuth credentials from your Databricks LLM provider above.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Configure the Databricks workspace URL and OAuth credentials by selecting Databricks as your LLM provider above. Those credentials are reused for embeddings.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     } else {
                         Text("Choose a Knowledge Base folder above to turn on retrieval settings. These controls are only used for Knowledge Base features such as relevant context and suggestions.")

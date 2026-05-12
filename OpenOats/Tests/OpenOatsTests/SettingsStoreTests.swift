@@ -45,7 +45,7 @@ final class SettingsStoreTests: XCTestCase {
 
     func testDefaultLLMProvider() {
         let store = makeStore()
-        XCTAssertEqual(store.llmProvider, .openRouter)
+        XCTAssertEqual(store.llmProvider, .databricks)
     }
 
     func testOpenRouterApiKeyAutoTrimsWhitespace() {
@@ -73,7 +73,7 @@ final class SettingsStoreTests: XCTestCase {
 
     func testDefaultEmbeddingProvider() {
         let store = makeStore()
-        XCTAssertEqual(store.embeddingProvider, .voyageAI)
+        XCTAssertEqual(store.embeddingProvider, .databricks)
     }
 
     func testVoyageApiKeyAutoTrimsWhitespace() {
@@ -720,7 +720,7 @@ final class SettingsStoreTests: XCTestCase {
         let store = makeStore(secretStore: secretStore)
 
         XCTAssertTrue(tracker.loadedKeys.isEmpty)
-        XCTAssertEqual(store.llmProvider, .openRouter)
+        XCTAssertEqual(store.llmProvider, .databricks)
         XCTAssertTrue(tracker.loadedKeys.isEmpty)
 
         XCTAssertEqual(store.openRouterApiKey, "sk-existing")

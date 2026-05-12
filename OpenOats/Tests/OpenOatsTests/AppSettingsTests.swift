@@ -113,13 +113,14 @@ final class AppSettingsTests: XCTestCase {
 
     func testEmbeddingProviderAllCases() {
         let cases = EmbeddingProvider.allCases
-        XCTAssertEqual(cases.count, 3)
+        XCTAssertEqual(cases.count, 4)
     }
 
     func testEmbeddingProviderDisplayNames() {
         XCTAssertEqual(EmbeddingProvider.voyageAI.displayName, "Voyage AI")
         XCTAssertEqual(EmbeddingProvider.ollama.displayName, "Ollama")
         XCTAssertEqual(EmbeddingProvider.openAICompatible.displayName, "OpenAI Compatible")
+        XCTAssertEqual(EmbeddingProvider.databricks.displayName, "Databricks")
     }
 
     func testEmbeddingProviderRoundTrip() {

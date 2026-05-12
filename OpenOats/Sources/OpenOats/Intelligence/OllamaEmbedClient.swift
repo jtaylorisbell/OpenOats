@@ -22,7 +22,13 @@ actor OllamaEmbedClient {
         guard let url = URL(string: normalized + "/v1/embeddings") else {
             throw EmbedClientError.invalidURL(provider: providerName)
         }
+        return try await embed(texts: texts, url: url, model: model, apiKey: apiKey, providerName: providerName)
+    }
 
+    /// Variant for OpenAI-compatible endpoints whose path doesn't end in `/v1/embeddings`.
+    /// Databricks Foundation Model APIs use `/serving-endpoints/embeddings`; the caller
+    /// builds the URL externally and passes it in.
+    func embed(texts: [String], url: URL, model: String, apiKey: String?, providerName: String) async throws -> [[Float]] {
         let body = EmbedRequest(model: model, input: texts)
 
         var request = URLRequest(url: url)

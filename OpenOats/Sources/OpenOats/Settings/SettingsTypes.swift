@@ -470,6 +470,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
     case voyageAI
     case ollama
     case openAICompatible
+    case databricks
 
     var id: String { rawValue }
 
@@ -478,6 +479,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
         case .voyageAI: "Voyage AI"
         case .ollama: "Ollama"
         case .openAICompatible: "OpenAI Compatible"
+        case .databricks: "Databricks"
         }
     }
 }

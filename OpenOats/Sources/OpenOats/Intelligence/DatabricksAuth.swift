@@ -129,6 +129,15 @@ actor DatabricksAuth {
             .appendingPathComponent("completions")
     }
 
+    /// Builds the embeddings URL for the Databricks Foundation Model APIs.
+    /// Path: `<workspace>/serving-endpoints/embeddings`.
+    static func embeddingsURL(for rawWorkspace: String) -> URL? {
+        guard let base = normalizedWorkspaceURL(rawWorkspace) else { return nil }
+        return base
+            .appendingPathComponent("serving-endpoints")
+            .appendingPathComponent("embeddings")
+    }
+
     private static func normalizedWorkspaceURL(_ rawWorkspace: String) -> URL? {
         var raw = rawWorkspace.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }

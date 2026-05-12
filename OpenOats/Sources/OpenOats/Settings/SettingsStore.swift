@@ -267,6 +267,17 @@ final class SettingsStore {
         }
     }
 
+    @ObservationIgnored nonisolated(unsafe) private var _databricksEmbedModel: String
+    var databricksEmbedModel: String {
+        get { access(keyPath: \.databricksEmbedModel); return _databricksEmbedModel }
+        set {
+            withMutation(keyPath: \.databricksEmbedModel) {
+                _databricksEmbedModel = newValue
+                defaults.set(newValue, forKey: "databricksEmbedModel")
+            }
+        }
+    }
+
     @ObservationIgnored nonisolated(unsafe) private var _openAIEmbedBaseURL: String
     var openAIEmbedBaseURL: String {
         get { access(keyPath: \.openAIEmbedBaseURL); return _openAIEmbedBaseURL }
@@ -1244,7 +1255,7 @@ final class SettingsStore {
         }
 
         // AI Settings
-        self._llmProvider = LLMProvider(rawValue: defaults.string(forKey: "llmProvider") ?? "") ?? .openRouter
+        self._llmProvider = LLMProvider(rawValue: defaults.string(forKey: "llmProvider") ?? "") ?? .databricks
         self._openRouterApiKey = ""
         self._assemblyAIApiKey = ""
         self._elevenLabsApiKey = ""
@@ -1260,11 +1271,12 @@ final class SettingsStore {
         self._databricksClientID = ""
         self._databricksClientSecret = ""
         self._databricksLLMModel = defaults.string(forKey: "databricksLLMModel") ?? "databricks-meta-llama-3-3-70b-instruct"
+        self._databricksEmbedModel = defaults.string(forKey: "databricksEmbedModel") ?? "databricks-bge-large-en"
         self._openAIEmbedBaseURL = defaults.string(forKey: "openAIEmbedBaseURL") ?? "http://localhost:8080"
         self._openAIEmbedApiKey = ""
         self._openAIEmbedModel = defaults.string(forKey: "openAIEmbedModel") ?? "text-embedding-3-small"
         self._selectedModel = defaults.string(forKey: "selectedModel") ?? "google/gemini-3-flash-preview"
-        self._embeddingProvider = EmbeddingProvider(rawValue: defaults.string(forKey: "embeddingProvider") ?? "") ?? .voyageAI
+        self._embeddingProvider = EmbeddingProvider(rawValue: defaults.string(forKey: "embeddingProvider") ?? "") ?? .databricks
         self._voyageApiKey = ""
         self._suggestionVerbosity = SuggestionVerbosity(
             rawValue: defaults.string(forKey: "suggestionVerbosity") ?? ""

@@ -28,6 +28,22 @@ enum WizardPrivacy: String, CaseIterable, Sendable {
     case cloud
 }
 
+/// Which cloud provider the user picks during onboarding. Only meaningful
+/// when `privacy == .cloud`. Maps to an `LLMProvider` at apply time.
+enum CloudProviderChoice: String, CaseIterable, Identifiable, Sendable {
+    case openRouter
+    case databricks
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .openRouter: "OpenRouter"
+        case .databricks: "Databricks"
+        }
+    }
+}
+
 // MARK: - Detection Results
 
 /// RAM tier derived from physical memory.

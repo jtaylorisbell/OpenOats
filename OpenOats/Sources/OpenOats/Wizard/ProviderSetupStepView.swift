@@ -87,29 +87,19 @@ struct ProviderSetupStepView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("OpenRouter API key")
-                    .font(.system(size: 12, weight: .medium))
-
-                HStack(spacing: 8) {
-                    TextField("sk-or-v1-...", text: $viewModel.openRouterKeyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12, design: .monospaced))
-
-                    validationIndicator(
-                        isValidating: viewModel.isValidatingOpenRouter,
-                        result: viewModel.openRouterValidation
-                    )
+            Picker("Provider", selection: $viewModel.cloudProviderChoice) {
+                ForEach(CloudProviderChoice.allCases) { choice in
+                    Text(choice.displayName).tag(choice)
                 }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
-                validationMessage(result: viewModel.openRouterValidation)
-
-                Link(
-                    "Don't have a key? Get one free in 30 seconds",
-                    destination: URL(string: "https://openrouter.ai/keys")!
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(Color.accentTeal)
+            switch viewModel.cloudProviderChoice {
+            case .openRouter:
+                openRouterFields
+            case .databricks:
+                databricksFields
             }
 
             if viewModel.intent == .fullCopilot {
@@ -142,6 +132,83 @@ struct ProviderSetupStepView: View {
                     .foregroundStyle(Color.accentTeal)
                 }
             }
+        }
+    }
+
+    private var openRouterFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("OpenRouter API key")
+                .font(.system(size: 12, weight: .medium))
+
+            HStack(spacing: 8) {
+                TextField("sk-or-v1-...", text: $viewModel.openRouterKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                validationIndicator(
+                    isValidating: viewModel.isValidatingOpenRouter,
+                    result: viewModel.openRouterValidation
+                )
+            }
+
+            validationMessage(result: viewModel.openRouterValidation)
+
+            Link(
+                "Don't have a key? Get one free in 30 seconds",
+                destination: URL(string: "https://openrouter.ai/keys")!
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(Color.accentTeal)
+        }
+    }
+
+    private var databricksFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Databricks workspace URL")
+                .font(.system(size: 12, weight: .medium))
+
+            TextField(
+                "https://your-workspace.cloud.databricks.com",
+                text: $viewModel.databricksWorkspaceInput
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12, design: .monospaced))
+
+            Text("Service principal credentials")
+                .font(.system(size: 12, weight: .medium))
+                .padding(.top, 4)
+
+            SecureField("Client ID", text: $viewModel.databricksClientIDInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+
+            HStack(spacing: 8) {
+                SecureField("Client Secret", text: $viewModel.databricksClientSecretInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+
+                validationIndicator(
+                    isValidating: viewModel.isValidatingDatabricks,
+                    result: viewModel.databricksValidation
+                )
+            }
+
+            validationMessage(result: viewModel.databricksValidation)
+
+            Text("Serving endpoint")
+                .font(.system(size: 12, weight: .medium))
+                .padding(.top, 4)
+
+            TextField(
+                "e.g. databricks-meta-llama-3-3-70b-instruct",
+                text: $viewModel.databricksModelInput
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12, design: .monospaced))
+
+            Text("Create a service principal under your workspace's Identity and Access settings, then generate an OAuth secret and grant it access to the serving endpoint.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
     }
 

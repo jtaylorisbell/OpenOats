@@ -139,6 +139,9 @@ final class WizardViewModelTests: XCTestCase {
         viewModel.intent = .notes
         viewModel.language = .english
         viewModel.privacy = .cloud
+        // Pin the cloud provider to OpenRouter for this test - the wizard's
+        // default cloud provider is independent of what this test cares about.
+        viewModel.cloudProviderChoice = .openRouter
 
         viewModel.applySettings(to: store)
 

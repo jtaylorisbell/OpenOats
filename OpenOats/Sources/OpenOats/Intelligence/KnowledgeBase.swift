@@ -684,6 +684,8 @@ final class KnowledgeBase {
             return "ollama|\(settings.ollamaBaseURL)|\(settings.ollamaEmbedModel)|n1"
         case .openAICompatible:
             return "openAI|\(settings.openAIEmbedBaseURL)|\(settings.openAIEmbedModel)|n1"
+        case .databricks:
+            return "databricks|\(settings.databricksWorkspaceURL)|\(settings.databricksEmbedModel)|n1"
         }
     }
 
@@ -710,6 +712,23 @@ final class KnowledgeBase {
                 baseURL: settings.openAIEmbedBaseURL,
                 model: settings.openAIEmbedModel,
                 apiKey: settings.openAIEmbedApiKey
+            )
+        case .databricks:
+            guard let url = DatabricksAuth.embeddingsURL(for: settings.databricksWorkspaceURL) else {
+                throw OllamaEmbedClient.EmbedClientError.invalidURL(provider: "Databricks")
+            }
+            let credentials = DatabricksAuth.Credentials(
+                workspaceHost: settings.databricksWorkspaceURL,
+                clientID: settings.databricksClientID,
+                clientSecret: settings.databricksClientSecret
+            )
+            let token = try await DatabricksAuth.shared.token(for: credentials)
+            return try await ollamaEmbedClient.embed(
+                texts: texts,
+                url: url,
+                model: settings.databricksEmbedModel,
+                apiKey: token,
+                providerName: "Databricks"
             )
         }
     }

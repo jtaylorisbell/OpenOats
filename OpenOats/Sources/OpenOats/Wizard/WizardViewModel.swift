@@ -81,6 +81,61 @@ final class WizardViewModel {
         }
     }
 
+    // MARK: - Cloud Provider Selection
+
+    @ObservationIgnored nonisolated(unsafe) private var _cloudProviderChoice: CloudProviderChoice = .databricks
+    var cloudProviderChoice: CloudProviderChoice {
+        get { access(keyPath: \.cloudProviderChoice); return _cloudProviderChoice }
+        set { withMutation(keyPath: \.cloudProviderChoice) { _cloudProviderChoice = newValue } }
+    }
+
+    // MARK: - Databricks Inputs
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksWorkspaceInput = ""
+    var databricksWorkspaceInput: String {
+        get { access(keyPath: \.databricksWorkspaceInput); return _databricksWorkspaceInput }
+        set {
+            withMutation(keyPath: \.databricksWorkspaceInput) { _databricksWorkspaceInput = newValue }
+            scheduleDatabricksValidation()
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksClientIDInput = ""
+    var databricksClientIDInput: String {
+        get { access(keyPath: \.databricksClientIDInput); return _databricksClientIDInput }
+        set {
+            withMutation(keyPath: \.databricksClientIDInput) { _databricksClientIDInput = newValue }
+            scheduleDatabricksValidation()
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksClientSecretInput = ""
+    var databricksClientSecretInput: String {
+        get { access(keyPath: \.databricksClientSecretInput); return _databricksClientSecretInput }
+        set {
+            withMutation(keyPath: \.databricksClientSecretInput) { _databricksClientSecretInput = newValue }
+            scheduleDatabricksValidation()
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksModelInput = "databricks-meta-llama-3-3-70b-instruct"
+    var databricksModelInput: String {
+        get { access(keyPath: \.databricksModelInput); return _databricksModelInput }
+        set { withMutation(keyPath: \.databricksModelInput) { _databricksModelInput = newValue } }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _databricksValidation: APIKeyValidator.ValidationResult?
+    var databricksValidation: APIKeyValidator.ValidationResult? {
+        get { access(keyPath: \.databricksValidation); return _databricksValidation }
+        set { withMutation(keyPath: \.databricksValidation) { _databricksValidation = newValue } }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _isValidatingDatabricks = false
+    var isValidatingDatabricks: Bool {
+        get { access(keyPath: \.isValidatingDatabricks); return _isValidatingDatabricks }
+        set { withMutation(keyPath: \.isValidatingDatabricks) { _isValidatingDatabricks = newValue } }
+    }
+
     // MARK: - Validation State
 
     @ObservationIgnored nonisolated(unsafe) private var _openRouterValidation: APIKeyValidator.ValidationResult?
@@ -189,6 +244,7 @@ final class WizardViewModel {
 
     private var openRouterValidationTask: Task<Void, Never>?
     private var voyageValidationTask: Task<Void, Never>?
+    private var databricksValidationTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -232,9 +288,18 @@ final class WizardViewModel {
         case .providerSetup:
             guard let recommendation else { return false }
             if recommendation.profile.isCloud {
-                let openRouterValid = openRouterValidation == .valid || openRouterValidation?.isNetworkError == true
                 let voyageValid = voyageKeyInput.isEmpty || voyageValidation == .valid || voyageValidation?.isNetworkError == true
-                return !openRouterKeyInput.isEmpty && openRouterValid && voyageValid
+                switch cloudProviderChoice {
+                case .openRouter:
+                    let openRouterValid = openRouterValidation == .valid || openRouterValidation?.isNetworkError == true
+                    return !openRouterKeyInput.isEmpty && openRouterValid && voyageValid
+                case .databricks:
+                    let databricksFilledIn = !databricksWorkspaceInput.isEmpty
+                        && !databricksClientIDInput.isEmpty
+                        && !databricksClientSecretInput.isEmpty
+                    let databricksValid = databricksValidation == .valid || databricksValidation?.isNetworkError == true
+                    return databricksFilledIn && databricksValid && voyageValid
+                }
             }
             if recommendation.profile.isLocal {
                 return ollamaStatus == .readyWithModels
@@ -358,6 +423,37 @@ final class WizardViewModel {
         }
     }
 
+    private func scheduleDatabricksValidation() {
+        databricksValidationTask?.cancel()
+        databricksValidation = nil
+
+        let allFilledIn = !databricksWorkspaceInput.isEmpty
+            && !databricksClientIDInput.isEmpty
+            && !databricksClientSecretInput.isEmpty
+        guard allFilledIn else {
+            isValidatingDatabricks = false
+            return
+        }
+        isValidatingDatabricks = true
+
+        databricksValidationTask = Task { [weak self] in
+            // Longer debounce than the API-key validators since each attempt
+            // hits the OAuth endpoint and the secret field is finicky.
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+
+            let result = await APIKeyValidator.validateDatabricksCredentials(
+                workspaceURL: self.databricksWorkspaceInput,
+                clientID: self.databricksClientIDInput,
+                clientSecret: self.databricksClientSecretInput
+            )
+            guard !Task.isCancelled else { return }
+
+            self.databricksValidation = result
+            self.isValidatingDatabricks = false
+        }
+    }
+
     // MARK: - Ollama Actions
 
     func checkOllamaStatus() async {
@@ -450,8 +546,23 @@ final class WizardViewModel {
         }
         settings.suggestionPanelEnabled = recommendation.suggestionPanelEnabled
 
-        if recommendation.profile.needsOpenRouterKey {
-            settings.openRouterApiKey = openRouterKeyInput
+        // The recommendation defaults the cloud path to OpenRouter. Override
+        // with the user's wizard choice so Databricks setups don't get the
+        // OpenRouter fields written instead.
+        if recommendation.profile.isCloud {
+            switch cloudProviderChoice {
+            case .openRouter:
+                settings.llmProvider = .openRouter
+                settings.openRouterApiKey = openRouterKeyInput
+            case .databricks:
+                settings.llmProvider = .databricks
+                settings.databricksWorkspaceURL = databricksWorkspaceInput
+                settings.databricksClientID = databricksClientIDInput
+                settings.databricksClientSecret = databricksClientSecretInput
+                if !databricksModelInput.isEmpty {
+                    settings.databricksLLMModel = databricksModelInput
+                }
+            }
         }
         if intent == .fullCopilot, recommendation.profile.isCloud {
             settings.voyageApiKey = voyageKeyInput
@@ -471,8 +582,23 @@ final class WizardViewModel {
         if !profile.isCloud {
             settings.openRouterApiKey = ""
             settings.voyageApiKey = ""
+            settings.databricksWorkspaceURL = ""
+            settings.databricksClientID = ""
+            settings.databricksClientSecret = ""
             settings.selectedModel = "google/gemini-3-flash-preview"
             settings.realtimeModel = "google/gemini-3.1-flash-lite-preview"
+        } else {
+            // Cloud path: clear the credentials for the provider the user did
+            // *not* choose, so leftover keys from a previous setup don't sit
+            // in keychain unused.
+            switch cloudProviderChoice {
+            case .openRouter:
+                settings.databricksWorkspaceURL = ""
+                settings.databricksClientID = ""
+                settings.databricksClientSecret = ""
+            case .databricks:
+                settings.openRouterApiKey = ""
+            }
         }
 
         if !profile.isLocal {
@@ -515,6 +641,26 @@ final class WizardViewModel {
             privacy = .local
         case .openRouter, .mlx, .openAICompatible, .databricks:
             privacy = .cloud
+        }
+
+        // Seed cloud provider choice + Databricks fields so reconfiguration
+        // doesn't lose the user's existing answers.
+        if settings.llmProvider == .databricks {
+            cloudProviderChoice = .databricks
+        } else {
+            cloudProviderChoice = .openRouter
+        }
+        if !settings.databricksWorkspaceURL.isEmpty {
+            databricksWorkspaceInput = settings.databricksWorkspaceURL
+        }
+        if !settings.databricksClientID.isEmpty {
+            databricksClientIDInput = settings.databricksClientID
+        }
+        if !settings.databricksClientSecret.isEmpty {
+            databricksClientSecretInput = settings.databricksClientSecret
+        }
+        if !settings.databricksLLMModel.isEmpty {
+            databricksModelInput = settings.databricksLLMModel
         }
     }
 }

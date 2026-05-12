@@ -100,6 +100,53 @@ enum APIKeyValidator {
         }
     }
 
+    /// Validate Databricks service-principal credentials by attempting an M2M
+    /// token exchange. Success implies the workspace URL, client ID, and
+    /// client secret all line up; failures distinguish auth from network errors.
+    static func validateDatabricksCredentials(
+        workspaceURL: String,
+        clientID: String,
+        clientSecret: String
+    ) async -> ValidationResult {
+        let workspace = workspaceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workspace.isEmpty else {
+            return .invalid(message: "Workspace URL is required")
+        }
+        guard !id.isEmpty, !secret.isEmpty else {
+            return .invalid(message: "Client ID and secret are required")
+        }
+        guard DatabricksAuth.tokenURL(for: workspace) != nil else {
+            return .invalid(message: "That doesn't look like a valid workspace URL")
+        }
+
+        let credentials = DatabricksAuth.Credentials(
+            workspaceHost: workspace,
+            clientID: id,
+            clientSecret: secret
+        )
+        // Drop any cached token first so we exercise the real exchange.
+        await DatabricksAuth.shared.invalidate(for: credentials)
+        do {
+            _ = try await DatabricksAuth.shared.token(for: credentials)
+            return .valid
+        } catch let error as DatabricksAuth.AuthError {
+            switch error {
+            case .tokenExchangeFailed(let status, _) where status == 401 || status == 403:
+                return .invalid(message: "Credentials rejected - check the client ID and secret in your Databricks workspace")
+            case .invalidWorkspaceURL:
+                return .invalid(message: "That doesn't look like a valid workspace URL")
+            case .missingCredentials:
+                return .invalid(message: "Client ID and secret are required")
+            case .tokenExchangeFailed, .malformedResponse:
+                return .networkError(message: error.localizedDescription)
+            }
+        } catch {
+            return .networkError(message: "Could not verify - will test when you go online")
+        }
+    }
+
     static func validationResult(
         for response: URLResponse,
         authFailureMessage: String
