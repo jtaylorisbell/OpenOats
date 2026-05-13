@@ -2,323 +2,175 @@ import AppKit
 import EventKit
 import Foundation
 
-/// Wraps EKEventStore to look up calendar events overlapping the current time.
-/// All access is gated behind the `calendarIntegrationEnabled` setting — the app
-/// only requests calendar permission when the user explicitly enables the feature.
+/// Coordinator that exposes a unified calendar interface across multiple sources
+/// (Apple EventKit, Google Calendar, ...).
+///
+/// The rest of the app interacts only with `CalendarManager`. Source-specific behaviour
+/// (auth, fetching, caching) lives in `CalendarSource` implementations.
+///
+/// Calendar identifiers everywhere outside of source implementations are *namespaced*:
+/// `"apple:<EK-id>"` or `"google:<gcal-id>"`. Pre-existing un-namespaced excluded IDs
+/// (from before this refactor) are treated as `"apple:<id>"` for backwards compatibility.
 @MainActor
 @Observable
 final class CalendarManager {
-    @ObservationIgnored private let store = EKEventStore()
+    private let appleSource: AppleCalendarSource
+    private var googleSource: GoogleCalendarSource?
 
-    enum AccessState {
-        case notDetermined
-        case authorized
-        case denied
+    /// Aggregated access state. `authorized` if any enabled source is authorized.
+    /// Falls back to the most restrictive non-authorized state otherwise.
+    private(set) var accessState: CalendarAccessState
+
+    init(
+        appleSource: AppleCalendarSource = AppleCalendarSource(),
+        googleSource: GoogleCalendarSource? = nil
+    ) {
+        self.appleSource = appleSource
+        self.googleSource = googleSource
+        self.accessState = Self.aggregateAccessState(apple: appleSource, google: googleSource)
     }
 
-    struct AvailableCalendar: Sendable, Hashable, Identifiable {
-        let id: String
-        let title: String
-        let sourceTitle: String?
-        let colorHex: String?
+    // MARK: - Sources
+
+    /// Connect a Google Calendar source (or replace an existing one).
+    /// Pass `nil` to remove the Google source entirely.
+    func setGoogleSource(_ source: GoogleCalendarSource?) {
+        googleSource = source
+        accessState = Self.aggregateAccessState(apple: appleSource, google: source)
     }
 
-    /// Current authorization status, observed at init and after requesting access.
-    private(set) var accessState: AccessState
+    /// Returns the connected Google source, if any.
+    var connectedGoogleSource: GoogleCalendarSource? { googleSource }
 
-    init() {
-        self.accessState = Self.currentAccessState()
-    }
+    /// Returns the access state of just the Apple source — used by UI that distinguishes
+    /// between system-level Calendar permission and overall connectivity.
+    var appleAccessState: CalendarAccessState { appleSource.accessState }
 
     // MARK: - Authorization
 
-    /// Re-reads the current TCC authorization status and updates `accessState` if it has drifted.
-    /// Safe to call at any time — never shows a system dialog.
+    /// Re-reads source authorization status. Never shows a dialog.
     func refreshFromSystem() {
-        let current = Self.currentAccessState()
-        if current != accessState {
-            accessState = current
-        }
+        appleSource.refreshFromSystem()
+        googleSource?.refreshFromSystem()
+        accessState = Self.aggregateAccessState(apple: appleSource, google: googleSource)
     }
 
-    /// Request calendar access. Returns true if authorized.
+    /// Request Apple Calendar access. Returns true if authorized.
+    /// Google access is requested via the dedicated OAuth flow (see `GoogleCalendarSource`).
     func requestAccess() async -> Bool {
-        do {
-            let granted = try await store.requestFullAccessToEvents()
-            accessState = granted ? .authorized : .denied
-            return granted
-        } catch {
-            accessState = .denied
-            return false
-        }
+        let granted = await appleSource.requestAccess()
+        accessState = Self.aggregateAccessState(apple: appleSource, google: googleSource)
+        return granted
     }
 
-    // MARK: - Event Lookup
+    // MARK: - Aggregated Lookups
 
-    /// Find the calendar event that best overlaps the given date (typically now).
-    /// Returns nil if no event is found or access is not authorized.
     func currentEvent(
         at date: Date = Date(),
         excludingCalendarIDs: [String] = []
     ) -> CalendarEvent? {
-        guard accessState == .authorized else { return nil }
-        let calendars = eventCalendars(excludingCalendarIDs: Set(excludingCalendarIDs))
-        guard !calendars.isEmpty else { return nil }
-
-        // Look for events in a window: started up to 15 min ago through 15 min from now
-        let windowStart = date.addingTimeInterval(-15 * 60)
-        let windowEnd = date.addingTimeInterval(15 * 60)
-
-        let predicate = store.predicateForEvents(
-            withStart: windowStart,
-            end: windowEnd,
-            calendars: calendars
-        )
-        let events = store.events(matching: predicate)
-
-        // Prefer the event whose start is closest to now, breaking ties by duration
-        let best = events
-            .filter { !$0.isAllDay }
-            .min { a, b in
-                let distA = abs(a.startDate.timeIntervalSince(date))
-                let distB = abs(b.startDate.timeIntervalSince(date))
-                if distA != distB { return distA < distB }
-                return a.startDate < b.startDate
-            }
-
-        guard let best else { return nil }
-        return CalendarEvent(from: best)
+        let routed = routeExclusions(excludingCalendarIDs)
+        let appleEvent = appleSource.currentEvent(at: date, excludingCalendarIDs: routed.apple)
+        let googleEvent = googleSource?.currentEvent(at: date, excludingCalendarIDs: routed.google)
+        return bestMatch(appleEvent, googleEvent, target: date)
     }
 
-    /// Upcoming calendar events starting within the given time window, ordered by start date.
-    /// Returns an empty array if access is not authorized.
     func upcomingEvents(
         from date: Date = Date(),
         within window: TimeInterval = 12 * 60 * 60,
         limit: Int = 5,
         excludingCalendarIDs: [String] = []
     ) -> [CalendarEvent] {
-        guard accessState == .authorized else { return [] }
-        let calendars = eventCalendars(excludingCalendarIDs: Set(excludingCalendarIDs))
-        guard !calendars.isEmpty else { return [] }
-
-        let windowEnd = date.addingTimeInterval(window)
-        let predicate = store.predicateForEvents(
-            withStart: date,
-            end: windowEnd,
-            calendars: calendars
+        let routed = routeExclusions(excludingCalendarIDs)
+        var combined = appleSource.upcomingEvents(
+            from: date,
+            within: window,
+            limit: limit,
+            excludingCalendarIDs: routed.apple
         )
-        let events = store.events(matching: predicate)
-            .filter { !$0.isAllDay && $0.startDate >= date }
-            .sorted { $0.startDate < $1.startDate }
-            .prefix(limit)
-
-        return events.map { CalendarEvent(from: $0) }
+        if let googleSource {
+            combined.append(contentsOf: googleSource.upcomingEvents(
+                from: date,
+                within: window,
+                limit: limit,
+                excludingCalendarIDs: routed.google
+            ))
+        }
+        return Array(
+            combined
+                .sorted { $0.startDate < $1.startDate }
+                .prefix(limit)
+        )
     }
 
-    /// Calendar events occurring on the same local day as the given date, ordered by start date.
-    /// Returns an empty array if access is not authorized.
     func events(
         onSameDayAs date: Date = Date(),
         excludingCalendarIDs: [String] = []
     ) -> [CalendarEvent] {
-        guard accessState == .authorized else { return [] }
-        let calendars = eventCalendars(excludingCalendarIDs: Set(excludingCalendarIDs))
-        guard !calendars.isEmpty else { return [] }
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: date)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
-            return []
+        let routed = routeExclusions(excludingCalendarIDs)
+        var combined = appleSource.events(onSameDayAs: date, excludingCalendarIDs: routed.apple)
+        if let googleSource {
+            combined.append(contentsOf: googleSource.events(
+                onSameDayAs: date,
+                excludingCalendarIDs: routed.google
+            ))
         }
+        return combined.sorted { $0.startDate < $1.startDate }
+    }
 
-        let predicate = store.predicateForEvents(
-            withStart: startOfDay,
-            end: endOfDay,
-            calendars: calendars
-        )
-        let events = store.events(matching: predicate)
-            .filter { !$0.isAllDay }
-            .sorted { $0.startDate < $1.startDate }
-
-        return events.map { CalendarEvent(from: $0) }
+    func availableCalendars() -> [AvailableCalendar] {
+        var calendars: [AvailableCalendar] = []
+        calendars.append(contentsOf: appleSource.availableCalendars())
+        if let googleSource {
+            calendars.append(contentsOf: googleSource.availableCalendars())
+        }
+        return calendars
     }
 
     // MARK: - Helpers
 
-    func availableCalendars() -> [AvailableCalendar] {
-        guard accessState == .authorized else { return [] }
-        return eventCalendars()
-            .map { calendar in
-                AvailableCalendar(
-                    id: calendar.calendarIdentifier,
-                    title: calendar.title,
-                    sourceTitle: calendar.source.title.nilIfBlank,
-                    colorHex: CalendarColorCodec.hexString(from: calendar.cgColor)
-                )
+    /// Splits caller-supplied excluded IDs by source. Un-namespaced IDs are assumed Apple
+    /// (legacy persisted data from before multi-source support).
+    /// `internal` for unit tests.
+    func routeExclusions(_ ids: [String]) -> (apple: Set<String>, google: Set<String>) {
+        var apple: Set<String> = []
+        var google: Set<String> = []
+        for raw in ids {
+            if raw.hasPrefix(CalendarSourceID.apple.prefix) {
+                apple.insert(String(raw.dropFirst(CalendarSourceID.apple.prefix.count)))
+            } else if raw.hasPrefix(CalendarSourceID.google.prefix) {
+                google.insert(String(raw.dropFirst(CalendarSourceID.google.prefix.count)))
+            } else {
+                // Legacy un-namespaced IDs are Apple identifiers.
+                apple.insert(raw)
             }
-            .sorted { lhs, rhs in
-                let lhsSource = lhs.sourceTitle ?? ""
-                let rhsSource = rhs.sourceTitle ?? ""
-                let sourceComparison = lhsSource.localizedCaseInsensitiveCompare(rhsSource)
-                if sourceComparison != .orderedSame {
-                    return sourceComparison == .orderedAscending
-                }
-                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-            }
-    }
-
-    private func eventCalendars(excludingCalendarIDs: Set<String> = []) -> [EKCalendar] {
-        store.calendars(for: .event)
-            .filter { !excludingCalendarIDs.contains($0.calendarIdentifier) }
-    }
-
-    private static func currentAccessState() -> AccessState {
-        switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess:
-            return .authorized
-        case .notDetermined:
-            return .notDetermined
-        default:
-            return .denied
         }
-    }
-}
-
-private extension String {
-    var nilIfBlank: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-// MARK: - EKEvent → CalendarEvent
-
-extension CalendarEvent {
-    init(from event: EKEvent) {
-        let meetingURL = CalendarMeetingLinkResolver.meetingURL(
-            rawURL: event.url,
-            notes: event.notes,
-            location: event.location
-        )
-        self.init(
-            id: event.eventIdentifier ?? UUID().uuidString,
-            title: event.title ?? "Untitled Event",
-            startDate: event.startDate,
-            endDate: event.endDate,
-            externalIdentifier: event.calendarItemExternalIdentifier,
-            calendarID: event.calendar.calendarIdentifier,
-            calendarTitle: event.calendar.title,
-            calendarColorHex: CalendarColorCodec.hexString(from: event.calendar.cgColor),
-            organizer: event.organizer?.name,
-            participants: (event.attendees ?? []).map { Participant(from: $0) },
-            isOnlineMeeting: CalendarMeetingLinkResolver.isOnlineMeeting(
-                rawURL: event.url,
-                notes: event.notes,
-                location: event.location
-            ),
-            meetingURL: meetingURL
-        )
-    }
-}
-
-extension Participant {
-    init(from attendee: EKParticipant) {
-        self.init(
-            name: attendee.name,
-            email: attendee.url.absoluteString
-                .replacingOccurrences(of: "mailto:", with: "")
-        )
-    }
-}
-
-enum CalendarMeetingLinkResolver {
-    private static let hostHints = [
-        "zoom.us",
-        "teams.microsoft",
-        "teams.live",
-        "meet.google",
-        "webex",
-        "whereby.com",
-        "around.co",
-        "jitsi",
-        "chime.aws",
-        "gotomeeting",
-        "bluejeans",
-        "facetime",
-    ]
-
-    private static let textHints = [
-        "zoom",
-        "teams",
-        "meet",
-        "webex",
-        "facetime",
-        "join",
-    ]
-
-    static func meetingURL(rawURL: URL?, notes: String?, location: String?) -> URL? {
-        if let rawURL {
-            return rawURL
-        }
-
-        let candidates = detectedURLs(in: notes) + detectedURLs(in: location)
-
-        if let preferred = candidates.first(where: isLikelyMeetingURL) {
-            return preferred
-        }
-
-        return nil
+        return (apple, google)
     }
 
-    static func isOnlineMeeting(rawURL: URL?, notes: String?, location: String?) -> Bool {
-        if meetingURL(rawURL: rawURL, notes: notes, location: location) != nil {
-            return true
-        }
-
-        let haystack = "\(notes ?? "")\n\(location ?? "")".lowercased()
-        return textHints.contains { haystack.contains($0) }
-    }
-
-    private static func detectedURLs(in text: String?) -> [URL] {
-        guard let text, !text.isEmpty else { return [] }
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return []
-        }
-
-        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        return detector.matches(in: text, options: [], range: nsRange).compactMap { match in
-            guard let url = match.url else { return nil }
-            guard let scheme = url.scheme?.lowercased() else { return nil }
-            guard scheme == "http" || scheme == "https" || scheme == "facetime" else {
-                return nil
-            }
-            return url
+    private func bestMatch(
+        _ a: CalendarEvent?,
+        _ b: CalendarEvent?,
+        target: Date
+    ) -> CalendarEvent? {
+        switch (a, b) {
+        case (nil, nil): return nil
+        case let (some?, nil): return some
+        case let (nil, some?): return some
+        case let (l?, r?):
+            let distL = abs(l.startDate.timeIntervalSince(target))
+            let distR = abs(r.startDate.timeIntervalSince(target))
+            return distL <= distR ? l : r
         }
     }
 
-    private static func isLikelyMeetingURL(_ url: URL) -> Bool {
-        if url.scheme?.lowercased() == "facetime" {
-            return true
-        }
-
-        let host = url.host?.lowercased() ?? ""
-        if hostHints.contains(where: host.contains) {
-            return true
-        }
-
-        let absolute = url.absoluteString.lowercased()
-        return textHints.contains(where: absolute.contains)
-    }
-}
-
-enum CalendarColorCodec {
-    static func hexString(from cgColor: CGColor?) -> String? {
-        guard let cgColor,
-              let nsColor = NSColor(cgColor: cgColor)?.usingColorSpace(.sRGB) else { return nil }
-
-        let red = Int(round(nsColor.redComponent * 255))
-        let green = Int(round(nsColor.greenComponent * 255))
-        let blue = Int(round(nsColor.blueComponent * 255))
-        return String(format: "#%02X%02X%02X", red, green, blue)
+    private static func aggregateAccessState(
+        apple: AppleCalendarSource,
+        google: GoogleCalendarSource?
+    ) -> CalendarAccessState {
+        let states = [apple.accessState, google?.accessState].compactMap { $0 }
+        if states.contains(.authorized) { return .authorized }
+        if states.contains(.notDetermined) { return .notDetermined }
+        return .denied
     }
 }

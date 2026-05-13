@@ -83,7 +83,7 @@ struct IdleHomeDashboardView: View {
     }
 
     @ViewBuilder
-    private func comingUpCard(accessState: CalendarManager.AccessState) -> some View {
+    private func comingUpCard(accessState: CalendarAccessState) -> some View {
         Group {
             if !settings.calendarIntegrationEnabled {
                 disabledCalendarCard
@@ -252,16 +252,16 @@ struct IdleHomeDashboardView: View {
         }
     }
 
-    private var currentAccessState: CalendarManager.AccessState {
+    private var currentAccessState: CalendarAccessState {
         guard settings.calendarIntegrationEnabled else { return .notDetermined }
         return container.calendarManager?.accessState ?? .notDetermined
     }
 
-    private func refreshTaskID(for accessState: CalendarManager.AccessState) -> String {
+    private func refreshTaskID(for accessState: CalendarAccessState) -> String {
         "\(settings.calendarIntegrationEnabled)-\(accessStateTag(for: accessState))-\(refreshTick)"
     }
 
-    private func accessStateTag(for accessState: CalendarManager.AccessState) -> String {
+    private func accessStateTag(for accessState: CalendarAccessState) -> String {
         switch accessState {
         case .authorized:
             return "authorized"
@@ -272,7 +272,7 @@ struct IdleHomeDashboardView: View {
         }
     }
 
-    private func refreshInterval(for accessState: CalendarManager.AccessState) -> Duration {
+    private func refreshInterval(for accessState: CalendarAccessState) -> Duration {
         switch accessState {
         case .authorized:
             return .seconds(60)

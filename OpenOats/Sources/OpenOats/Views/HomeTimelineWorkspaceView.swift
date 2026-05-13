@@ -72,7 +72,7 @@ struct HomeTimelineWorkspaceView: View {
     }
 
     @ViewBuilder
-    private func workspace(controller: NotesController, accessState: CalendarManager.AccessState) -> some View {
+    private func workspace(controller: NotesController, accessState: CalendarAccessState) -> some View {
         let groups = HomeTimelineGrouping.groups(
             calendarEvents: calendarEvents,
             savedSessions: controller.state.sessionHistory
@@ -104,7 +104,7 @@ struct HomeTimelineWorkspaceView: View {
     private func timelinePane(
         controller: NotesController,
         groups: [HomeTimelineDayGroup],
-        accessState: CalendarManager.AccessState,
+        accessState: CalendarAccessState,
         isDetailVisible: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -212,7 +212,7 @@ struct HomeTimelineWorkspaceView: View {
 
     @ViewBuilder
     private func calendarAccessNotice(
-        accessState: CalendarManager.AccessState,
+        accessState: CalendarAccessState,
         hasCalendarEntries: Bool
     ) -> some View {
         if !settings.calendarIntegrationEnabled {
@@ -242,7 +242,7 @@ struct HomeTimelineWorkspaceView: View {
         }
     }
 
-    private func emptyTimeline(accessState: CalendarManager.AccessState) -> some View {
+    private func emptyTimeline(accessState: CalendarAccessState) -> some View {
         let copy = emptyTimelineCopy(accessState: accessState)
 
         return ContentUnavailableView {
@@ -254,7 +254,7 @@ struct HomeTimelineWorkspaceView: View {
         .padding(.vertical, 30)
     }
 
-    private func emptyTimelineCopy(accessState: CalendarManager.AccessState) -> (title: String, description: String) {
+    private func emptyTimelineCopy(accessState: CalendarAccessState) -> (title: String, description: String) {
         if !settings.calendarIntegrationEnabled {
             return (
                 "No saved meetings yet",
@@ -333,16 +333,16 @@ struct HomeTimelineWorkspaceView: View {
         calendarEvents = combined
     }
 
-    private var currentAccessState: CalendarManager.AccessState {
+    private var currentAccessState: CalendarAccessState {
         guard settings.calendarIntegrationEnabled else { return .notDetermined }
         return container.calendarManager?.accessState ?? .notDetermined
     }
 
-    private func refreshTaskID(for accessState: CalendarManager.AccessState) -> String {
+    private func refreshTaskID(for accessState: CalendarAccessState) -> String {
         "\(settings.calendarIntegrationEnabled)-\(accessStateTag(for: accessState))-\(refreshTick)"
     }
 
-    private func accessStateTag(for accessState: CalendarManager.AccessState) -> String {
+    private func accessStateTag(for accessState: CalendarAccessState) -> String {
         switch accessState {
         case .authorized:
             return "authorized"
@@ -353,7 +353,7 @@ struct HomeTimelineWorkspaceView: View {
         }
     }
 
-    private func refreshInterval(for accessState: CalendarManager.AccessState) -> Duration {
+    private func refreshInterval(for accessState: CalendarAccessState) -> Duration {
         switch accessState {
         case .authorized:
             return .seconds(60)

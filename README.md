@@ -33,6 +33,7 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Live transcript** — see both sides of the conversation as it happens, copy the whole thing with one click
 - **Auto-saved sessions** — every conversation is automatically saved as a plain-text transcript and a structured session log, no manual export needed
 - **Knowledge base search** — point it at a folder of notes and it pulls in what's relevant using [Voyage AI](https://www.voyageai.com/) embeddings, local Ollama embeddings, or any OpenAI-compatible endpoint (llama.cpp, llamaswap, LiteLLM, vLLM, etc.)
+- **Calendar integration** — auto-titles sessions and surfaces upcoming meetings from macOS Calendar and/or Google Calendar (opt-in, BYO OAuth client)
 
 ## How it works
 
@@ -104,6 +105,19 @@ The first run downloads the local speech model (~600 MB).
 Point the app at a folder of Markdown or plain text files. That's it. OpenOats chunks, embeds, and caches them locally. When the conversation shifts, it searches your notes and only surfaces what's actually relevant.
 
 Works well with meeting prep docs, research notes, pitch decks, competitive analysis, customer briefs — anything you'd want at your fingertips during a call.
+
+## Google Calendar (optional)
+
+OpenOats can pull events from Google Calendar in addition to (or instead of) macOS Calendar. Setup is opt-in and requires you to register your own Google OAuth client — OpenOats does not ship with a shared one. Steps:
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create (or pick) a project.
+2. Enable the **Google Calendar API** under "APIs & Services → Library".
+3. Configure the **OAuth consent screen** ("External" user type, add your email as a test user).
+4. Under "APIs & Services → Credentials", create an **OAuth 2.0 Client ID** of type **Desktop app**.
+5. Copy the Client ID and Client Secret into OpenOats Settings → Calendar → Google Calendar.
+6. Click **Connect Google Account**. Your default browser opens for sign-in; once you approve, the window says "You can close this window."
+
+OpenOats requests the read-only `calendar.readonly` and `userinfo.email` scopes only. The OAuth flow uses PKCE + a loopback redirect (`http://127.0.0.1:<port>`) — no traffic leaves your Mac except to `accounts.google.com`, `oauth2.googleapis.com`, and `www.googleapis.com`.
 
 ## Privacy
 
@@ -186,11 +200,26 @@ Chunks are sent in batches of 32. Only new or changed files are embedded — unc
 - The full session transcript (both speakers, with timestamps, labeled "You" / "Them") — truncated to ~60,000 characters if very long
 - The meeting template's system prompt (e.g., instructions for formatting notes)
 
+#### 8. Google Calendar — opt-in (`googleapis.com`)
+
+**When:** Only if you enable Google Calendar in Settings → Calendar and complete OAuth sign-in.
+
+**What is sent:**
+- An OAuth bearer token (issued by Google) with each request
+- Calendar list and event-list queries to `www.googleapis.com/calendar/v3` covering the window `now − 2h` through `now + 7 days`
+- A one-time request to `oauth2.googleapis.com/oauth2/v3/userinfo` to read the signed-in account email for display
+
+**What is received and stored locally:**
+- Event metadata: title, start/end, attendees, organizer, location, description, conference links
+- This data lives only in memory (a 5-minute-refreshed cache) and the on-disk session transcripts you choose to save.
+
+OAuth tokens are stored in your Mac's Keychain. The macOS Calendar (EventKit) integration is unaffected by this setting — they can run side by side, or either one alone.
+
 #### What is never sent
 
 - **Audio** — transcription is always on-device via Apple Speech
 - **File paths or filenames from your system** (only KB source filenames appear in prompts)
-- **Your API keys to anyone other than the respective provider** (OpenRouter key to OpenRouter, Voyage key to Voyage)
+- **Your API keys to anyone other than the respective provider** (OpenRouter key to OpenRouter, Voyage key to Voyage, Google OAuth tokens to Google)
 - **Any data when using Ollama** — all requests go to your local machine
 
 ## Build
