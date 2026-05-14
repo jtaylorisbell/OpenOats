@@ -238,6 +238,10 @@ final class AppContainer {
 
     /// Enable or disable calendar event lookup based on the user setting.
     /// When enabled for the first time, creates the CalendarManager and requests access.
+    ///
+    /// Callers that know which source the user has selected should prefer
+    /// `syncCalendarSources(settings:)` — it enforces the picker's mutual
+    /// exclusion between macOS and Google Calendar.
     func updateCalendarIntegration(enabled: Bool) {
         if enabled {
             if calendarManager == nil {
@@ -246,13 +250,51 @@ final class AppContainer {
                 // Re-read TCC in case the system state changed since the manager was created.
                 calendarManager?.refreshFromSystem()
             }
-            if calendarManager?.appleAccessState == .notDetermined {
+            if calendarManager?.appleEnabled == true,
+               calendarManager?.appleAccessState == .notDetermined {
                 Task {
                     _ = await calendarManager?.requestAccess()
                 }
             }
         } else {
             setCalendarManager(nil)
+        }
+    }
+
+    /// Single entry point that reconciles both calendar sources with the user's
+    /// settings. Enforces the picker's mutual exclusion: when Google is the
+    /// selected source, the Apple source is disabled (events excluded, no
+    /// access request).
+    func syncCalendarSources(settings: AppSettings) {
+        guard settings.calendarIntegrationEnabled else {
+            setCalendarManager(nil)
+            return
+        }
+
+        if calendarManager == nil {
+            setCalendarManager(CalendarManager())
+        }
+        guard let manager = calendarManager else { return }
+        manager.refreshFromSystem()
+
+        let appleActive = !settings.googleCalendarEnabled
+        manager.setAppleEnabled(appleActive)
+
+        if appleActive, manager.appleAccessState == .notDetermined {
+            Task { _ = await manager.requestAccess() }
+        }
+
+        if settings.googleCalendarEnabled {
+            if manager.connectedGoogleSource == nil {
+                let oauth = GoogleOAuthClient(
+                    clientID: settings.googleOAuthClientID,
+                    clientSecret: settings.googleOAuthClientSecret
+                )
+                manager.setGoogleSource(GoogleCalendarSource(oauth: oauth))
+            }
+        } else {
+            manager.connectedGoogleSource?.disconnect()
+            manager.setGoogleSource(nil)
         }
     }
 
@@ -281,6 +323,8 @@ final class AppContainer {
             if let manager = calendarManager {
                 manager.connectedGoogleSource?.disconnect()
                 manager.setGoogleSource(nil)
+                // Re-enable apple now that google has been deselected.
+                manager.setAppleEnabled(true)
             }
             return
         }
@@ -296,6 +340,8 @@ final class AppContainer {
             let source = GoogleCalendarSource(oauth: oauth)
             manager.setGoogleSource(source)
         }
+        // Picker semantics: Google is mutually exclusive with macOS Calendar.
+        manager.setAppleEnabled(false)
     }
 
     /// Kick off the Google OAuth sign-in flow. Returns true on success.

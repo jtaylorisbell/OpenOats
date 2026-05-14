@@ -17,6 +17,12 @@ final class CalendarManager {
     private let appleSource: AppleCalendarSource
     private var googleSource: GoogleCalendarSource?
 
+    /// Whether the Apple source contributes to aggregated queries. Toggled off
+    /// when the user picks Google Calendar as their exclusive source — keeps
+    /// the source instance around (so permission state survives) but skips
+    /// its events.
+    private(set) var appleEnabled: Bool = true
+
     /// Aggregated access state. `authorized` if any enabled source is authorized.
     /// Falls back to the most restrictive non-authorized state otherwise.
     private(set) var accessState: CalendarAccessState
@@ -36,7 +42,15 @@ final class CalendarManager {
     /// Pass `nil` to remove the Google source entirely.
     func setGoogleSource(_ source: GoogleCalendarSource?) {
         googleSource = source
-        accessState = Self.aggregateAccessState(apple: appleSource, google: source)
+        accessState = Self.aggregateAccessState(apple: appleEnabled ? appleSource : nil, google: source)
+    }
+
+    /// Enable or disable the Apple source contribution. Used to enforce the
+    /// "single calendar source" picker — when Google is selected, set this to
+    /// `false` so Apple events are excluded from aggregated queries.
+    func setAppleEnabled(_ enabled: Bool) {
+        appleEnabled = enabled
+        accessState = Self.aggregateAccessState(apple: enabled ? appleSource : nil, google: googleSource)
     }
 
     /// Returns the connected Google source, if any.
@@ -52,14 +66,14 @@ final class CalendarManager {
     func refreshFromSystem() {
         appleSource.refreshFromSystem()
         googleSource?.refreshFromSystem()
-        accessState = Self.aggregateAccessState(apple: appleSource, google: googleSource)
+        accessState = Self.aggregateAccessState(apple: appleEnabled ? appleSource : nil, google: googleSource)
     }
 
     /// Request Apple Calendar access. Returns true if authorized.
     /// Google access is requested via the dedicated OAuth flow (see `GoogleCalendarSource`).
     func requestAccess() async -> Bool {
         let granted = await appleSource.requestAccess()
-        accessState = Self.aggregateAccessState(apple: appleSource, google: googleSource)
+        accessState = Self.aggregateAccessState(apple: appleEnabled ? appleSource : nil, google: googleSource)
         return granted
     }
 
@@ -70,7 +84,9 @@ final class CalendarManager {
         excludingCalendarIDs: [String] = []
     ) -> CalendarEvent? {
         let routed = routeExclusions(excludingCalendarIDs)
-        let appleEvent = appleSource.currentEvent(at: date, excludingCalendarIDs: routed.apple)
+        let appleEvent = appleEnabled
+            ? appleSource.currentEvent(at: date, excludingCalendarIDs: routed.apple)
+            : nil
         let googleEvent = googleSource?.currentEvent(at: date, excludingCalendarIDs: routed.google)
         return bestMatch(appleEvent, googleEvent, target: date)
     }
@@ -82,12 +98,15 @@ final class CalendarManager {
         excludingCalendarIDs: [String] = []
     ) -> [CalendarEvent] {
         let routed = routeExclusions(excludingCalendarIDs)
-        var combined = appleSource.upcomingEvents(
-            from: date,
-            within: window,
-            limit: limit,
-            excludingCalendarIDs: routed.apple
-        )
+        var combined: [CalendarEvent] = []
+        if appleEnabled {
+            combined.append(contentsOf: appleSource.upcomingEvents(
+                from: date,
+                within: window,
+                limit: limit,
+                excludingCalendarIDs: routed.apple
+            ))
+        }
         if let googleSource {
             combined.append(contentsOf: googleSource.upcomingEvents(
                 from: date,
@@ -108,7 +127,10 @@ final class CalendarManager {
         excludingCalendarIDs: [String] = []
     ) -> [CalendarEvent] {
         let routed = routeExclusions(excludingCalendarIDs)
-        var combined = appleSource.events(onSameDayAs: date, excludingCalendarIDs: routed.apple)
+        var combined: [CalendarEvent] = []
+        if appleEnabled {
+            combined.append(contentsOf: appleSource.events(onSameDayAs: date, excludingCalendarIDs: routed.apple))
+        }
         if let googleSource {
             combined.append(contentsOf: googleSource.events(
                 onSameDayAs: date,
@@ -120,7 +142,9 @@ final class CalendarManager {
 
     func availableCalendars() -> [AvailableCalendar] {
         var calendars: [AvailableCalendar] = []
-        calendars.append(contentsOf: appleSource.availableCalendars())
+        if appleEnabled {
+            calendars.append(contentsOf: appleSource.availableCalendars())
+        }
         if let googleSource {
             calendars.append(contentsOf: googleSource.availableCalendars())
         }
@@ -165,10 +189,11 @@ final class CalendarManager {
     }
 
     private static func aggregateAccessState(
-        apple: AppleCalendarSource,
+        apple: AppleCalendarSource?,
         google: GoogleCalendarSource?
     ) -> CalendarAccessState {
-        let states = [apple.accessState, google?.accessState].compactMap { $0 }
+        let states = [apple?.accessState, google?.accessState].compactMap { $0 }
+        if states.isEmpty { return .notDetermined }
         if states.contains(.authorized) { return .authorized }
         if states.contains(.notDetermined) { return .notDetermined }
         return .denied

@@ -30,7 +30,7 @@ struct HomeTimelineWorkspaceView: View {
             }
         }
         .onAppear {
-            container.updateCalendarIntegration(enabled: settings.calendarIntegrationEnabled)
+            container.syncCalendarSources(settings: settings)
         }
         .task {
             if coordinator.knowledgeBase == nil {

@@ -39,7 +39,7 @@ struct IdleHomeDashboardView: View {
         .padding(.top, 10)
         .padding(.bottom, 8)
         .onAppear {
-            container.updateCalendarIntegration(enabled: settings.calendarIntegrationEnabled)
+            container.syncCalendarSources(settings: settings)
         }
         .task(id: refreshTaskID(for: accessState)) {
             await refresh()

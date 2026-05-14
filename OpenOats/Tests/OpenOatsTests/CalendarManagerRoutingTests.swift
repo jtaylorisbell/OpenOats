@@ -34,4 +34,23 @@ final class CalendarManagerRoutingTests: XCTestCase {
         XCTAssertTrue(apple.isEmpty)
         XCTAssertTrue(google.isEmpty)
     }
+
+    func testAppleEnabledDefaultsTrueAndCanBeToggled() {
+        let manager = CalendarManager()
+        XCTAssertTrue(manager.appleEnabled)
+        manager.setAppleEnabled(false)
+        XCTAssertFalse(manager.appleEnabled)
+        manager.setAppleEnabled(true)
+        XCTAssertTrue(manager.appleEnabled)
+    }
+
+    func testDisablingAppleExcludesAppleCalendarsFromAvailable() {
+        // No google source attached → availableCalendars should be empty when apple is disabled.
+        let manager = CalendarManager()
+        manager.setAppleEnabled(false)
+        // We don't have access to real EventKit calendars in tests; the point is that
+        // availableCalendars short-circuits the apple branch and returns no apple entries.
+        let calendars = manager.availableCalendars()
+        XCTAssertTrue(calendars.allSatisfy { !$0.id.hasPrefix("apple:") })
+    }
 }

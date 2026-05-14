@@ -22,15 +22,52 @@ struct CalendarSettingsTab: View {
         var id: String { title }
     }
 
+    private enum CalendarSourceChoice: Hashable {
+        case none, apple, google
+    }
+
+    private var currentSourceChoice: CalendarSourceChoice {
+        if settings.googleCalendarEnabled { return .google }
+        if settings.calendarIntegrationEnabled { return .apple }
+        return .none
+    }
+
+    private var calendarSourceBinding: Binding<CalendarSourceChoice> {
+        Binding(
+            get: { currentSourceChoice },
+            set: { newValue in
+                switch newValue {
+                case .none:
+                    settings.googleCalendarEnabled = false
+                    settings.calendarIntegrationEnabled = false
+                case .apple:
+                    settings.googleCalendarEnabled = false
+                    settings.calendarIntegrationEnabled = true
+                case .google:
+                    settings.calendarIntegrationEnabled = true
+                    settings.googleCalendarEnabled = true
+                }
+            }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                accessCard
+                sourcePickerCard
 
-                if settings.calendarIntegrationEnabled {
-                    googleCalendarCard
-
+                switch currentSourceChoice {
+                case .none:
+                    EmptyView()
+                case .apple:
+                    accessCard
                     if accessState == .authorized {
+                        calendarsCard
+                        cloudSharingCard
+                    }
+                case .google:
+                    googleCalendarCard
+                    if isGoogleConnected {
                         calendarsCard
                         cloudSharingCard
                     }
@@ -41,7 +78,7 @@ struct CalendarSettingsTab: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task {
-            syncCalendarIntegration()
+            container.syncCalendarSources(settings: settings)
             refreshTick &+= 1
         }
         .task(id: refreshTaskID) {
@@ -51,15 +88,35 @@ struct CalendarSettingsTab: View {
             refreshTick &+= 1
         }
         .onChange(of: settings.calendarIntegrationEnabled) {
-            syncCalendarIntegration()
+            container.syncCalendarSources(settings: settings)
             refreshTick &+= 1
         }
         .onChange(of: settings.excludedCalendarIDs) {
             refreshTick &+= 1
         }
         .onChange(of: settings.googleCalendarEnabled) {
-            container.updateGoogleCalendarIntegration(settings: settings)
+            container.syncCalendarSources(settings: settings)
             refreshTick &+= 1
+        }
+    }
+
+    private var sourcePickerCard: some View {
+        settingsCard {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Calendar source")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Pick where OpenOats reads meeting events from. Only one source can be active at a time.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("", selection: calendarSourceBinding) {
+                Text("None").tag(CalendarSourceChoice.none)
+                Text("macOS Calendar").tag(CalendarSourceChoice.apple)
+                Text("Google Calendar").tag(CalendarSourceChoice.google)
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
         }
     }
 
@@ -116,22 +173,15 @@ struct CalendarSettingsTab: View {
         settingsCard {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Calendar")
+                    Text("macOS Calendar")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("Use macOS Calendar to match meetings and title sessions.")
+                    Text("Match meetings and title sessions using your macOS Calendar events.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if settings.calendarIntegrationEnabled {
-                    refreshButton
-                }
+                refreshButton
             }
-
-            Toggle("Use Calendar to identify meetings", isOn: $settings.calendarIntegrationEnabled)
-                .font(.system(size: 12))
-
-            Divider()
 
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
@@ -165,106 +215,101 @@ struct CalendarSettingsTab: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Google Calendar")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("Sign in to include Google Calendar events alongside macOS Calendar.")
+                    Text("Sign in with a Google account to read events from your Google Calendar.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
-            Toggle("Use Google Calendar", isOn: $settings.googleCalendarEnabled)
-                .font(.system(size: 12))
+            Divider()
 
-            if settings.googleCalendarEnabled {
-                Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("OAuth Client (Desktop app)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Create a Desktop OAuth client in Google Cloud Console and paste the credentials here. See the README for the step-by-step setup.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("OAuth Client (Desktop app)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Create a Desktop OAuth client in Google Cloud Console and paste the credentials here. See the README for the step-by-step setup.")
+                HStack(spacing: 8) {
+                    Text("Client ID")
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 8) {
-                        Text("Client ID")
-                            .font(.system(size: 11))
-                            .frame(width: 88, alignment: .trailing)
-                        TextField("123…apps.googleusercontent.com", text: $settings.googleOAuthClientID)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .disabled(isGoogleConnected)
-                    }
-                    HStack(spacing: 8) {
-                        Text("Client secret")
-                            .font(.system(size: 11))
-                            .frame(width: 88, alignment: .trailing)
-                        SecureField("GOCSPX-…", text: $settings.googleOAuthClientSecret)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .disabled(isGoogleConnected)
-                    }
+                        .frame(width: 88, alignment: .trailing)
+                    TextField("123…apps.googleusercontent.com", text: $settings.googleOAuthClientID)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .disabled(isGoogleConnected)
                 }
-
-                Divider()
-
-                HStack(spacing: 12) {
-                    if isGoogleConnected {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Connected")
-                                    .font(.system(size: 12, weight: .medium))
-                                if let email = googleAccountEmail {
-                                    Text(email)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } icon: {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                        Spacer()
-                        Button("Disconnect", role: .destructive) {
-                            container.disconnectGoogleCalendar()
-                            googleSignInError = nil
-                            refreshTick &+= 1
-                        }
-                        .font(.system(size: 12))
-                    } else {
-                        if googleSignInInProgress {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Waiting for browser sign-in…")
-                                .font(.system(size: 12))
-                        } else {
-                            Spacer()
-                        }
-                        Spacer()
-                        Button("Connect Google Account") {
-                            connectGoogleCalendar()
-                        }
-                        .font(.system(size: 12))
-                        .buttonStyle(.borderedProminent)
-                        .disabled(
-                            googleSignInInProgress
-                                || settings.googleOAuthClientID.isEmpty
-                                || settings.googleOAuthClientSecret.isEmpty
-                        )
-                    }
-                }
-
-                if let googleSignInError {
-                    Text(googleSignInError)
+                HStack(spacing: 8) {
+                    Text("Client secret")
                         .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+                        .frame(width: 88, alignment: .trailing)
+                    SecureField("GOCSPX-…", text: $settings.googleOAuthClientSecret)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .disabled(isGoogleConnected)
                 }
+            }
 
+            Divider()
+
+            HStack(spacing: 12) {
                 if isGoogleConnected {
-                    Text("OpenOats fetches events for the next 7 days from your selected Google calendars. Refreshes every 5 minutes while the app is running.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Connected")
+                                .font(.system(size: 12, weight: .medium))
+                            if let email = googleAccountEmail {
+                                Text(email)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                    Button("Disconnect", role: .destructive) {
+                        container.disconnectGoogleCalendar()
+                        googleSignInError = nil
+                        refreshTick &+= 1
+                    }
+                    .font(.system(size: 12))
+                } else {
+                    if googleSignInInProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Waiting for browser sign-in…")
+                            .font(.system(size: 12))
+                    } else {
+                        Spacer()
+                    }
+                    Spacer()
+                    Button("Connect Google Account") {
+                        connectGoogleCalendar()
+                    }
+                    .font(.system(size: 12))
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        googleSignInInProgress
+                            || settings.googleOAuthClientID.isEmpty
+                            || settings.googleOAuthClientSecret.isEmpty
+                    )
                 }
+            }
+
+            if let googleSignInError {
+                Text(googleSignInError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+            }
+
+            if isGoogleConnected {
+                Text("OpenOats fetches events for the next 7 days from your selected Google calendars. Refreshes every 5 minutes while the app is running.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -496,7 +541,7 @@ struct CalendarSettingsTab: View {
         }
 
         if container.calendarManager == nil {
-            syncCalendarIntegration()
+            container.syncCalendarSources(settings: settings)
         }
 
         guard let manager = container.calendarManager else {
@@ -530,10 +575,6 @@ struct CalendarSettingsTab: View {
             showReloadSuccess = true
             clearReloadSuccessSoon()
         }
-    }
-
-    private func syncCalendarIntegration() {
-        container.updateCalendarIntegration(enabled: settings.calendarIntegrationEnabled)
     }
 
     private func clearReloadSuccessSoon() {

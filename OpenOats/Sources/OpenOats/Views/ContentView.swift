@@ -338,7 +338,7 @@ struct ContentView: View {
             await controller.performInitialSetup()
 
             // Setup calendar integration if enabled
-            container.updateCalendarIntegration(enabled: settings.calendarIntegrationEnabled)
+            container.syncCalendarSources(settings: settings)
 
             // Setup meeting detection if enabled
             if settings.meetingAutoDetectEnabled {
@@ -360,7 +360,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: settings.calendarIntegrationEnabled) {
-            container.updateCalendarIntegration(enabled: settings.calendarIntegrationEnabled)
+            container.syncCalendarSources(settings: settings)
         }
         .onChange(of: settings.suggestionsAlwaysOnTop) {
             overlayManager.updateAlwaysOnTop(settings.suggestionsAlwaysOnTop)
