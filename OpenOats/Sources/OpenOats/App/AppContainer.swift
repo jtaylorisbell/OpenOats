@@ -246,7 +246,7 @@ final class AppContainer {
                 // Re-read TCC in case the system state changed since the manager was created.
                 calendarManager?.refreshFromSystem()
             }
-            if calendarManager?.accessState == .notDetermined {
+            if calendarManager?.appleAccessState == .notDetermined {
                 Task {
                     _ = await calendarManager?.requestAccess()
                 }
@@ -264,12 +264,60 @@ final class AppContainer {
             updateCalendarIntegration(enabled: true)
             return
         }
-        setCalendarManager(CalendarManager())
-        if calendarManager?.accessState == .notDetermined {
+        let previousGoogleSource = calendarManager?.connectedGoogleSource
+        setCalendarManager(CalendarManager(googleSource: previousGoogleSource))
+        if calendarManager?.appleAccessState == .notDetermined {
             Task {
                 _ = await calendarManager?.requestAccess()
             }
         }
+    }
+
+    /// Enable, refresh, or disable the Google Calendar source based on the user setting.
+    /// When enabling for the first time, this only prepares the OAuth client — actual sign-in
+    /// is triggered from the Settings UI via `connectGoogleCalendar()`.
+    func updateGoogleCalendarIntegration(settings: AppSettings) {
+        guard settings.calendarIntegrationEnabled, settings.googleCalendarEnabled else {
+            if let manager = calendarManager {
+                manager.connectedGoogleSource?.disconnect()
+                manager.setGoogleSource(nil)
+            }
+            return
+        }
+        if calendarManager == nil {
+            setCalendarManager(CalendarManager())
+        }
+        guard let manager = calendarManager else { return }
+        if manager.connectedGoogleSource == nil {
+            let oauth = GoogleOAuthClient(
+                clientID: settings.googleOAuthClientID,
+                clientSecret: settings.googleOAuthClientSecret
+            )
+            let source = GoogleCalendarSource(oauth: oauth)
+            manager.setGoogleSource(source)
+        }
+    }
+
+    /// Kick off the Google OAuth sign-in flow. Returns true on success.
+    @discardableResult
+    func connectGoogleCalendar(settings: AppSettings) async -> Bool {
+        updateGoogleCalendarIntegration(settings: settings)
+        guard let manager = calendarManager else { return false }
+        // Always rebuild the source so the latest client ID / secret values are picked up
+        // even if the user edited them between attempts.
+        let oauth = GoogleOAuthClient(
+            clientID: settings.googleOAuthClientID,
+            clientSecret: settings.googleOAuthClientSecret
+        )
+        let source = GoogleCalendarSource(oauth: oauth)
+        manager.setGoogleSource(source)
+        return await source.requestAccess()
+    }
+
+    /// Disconnect the Google Calendar source.
+    func disconnectGoogleCalendar() {
+        calendarManager?.connectedGoogleSource?.disconnect()
+        calendarManager?.setGoogleSource(nil)
     }
 
     private func setCalendarManager(_ manager: CalendarManager?) {

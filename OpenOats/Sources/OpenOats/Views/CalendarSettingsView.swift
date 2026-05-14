@@ -5,16 +5,19 @@ struct CalendarSettingsTab: View {
     @Bindable var settings: AppSettings
     @Environment(AppContainer.self) private var container
 
-    @State private var accessState: CalendarManager.AccessState = .notDetermined
-    @State private var availableCalendars: [CalendarManager.AvailableCalendar] = []
+    @State private var accessState: CalendarAccessState = .notDetermined
+    @State private var availableCalendars: [AvailableCalendar] = []
     @State private var refreshTick: Int = 0
     @State private var isManualRefreshInFlight = false
     @State private var showReloadSuccess = false
     @State private var reloadErrorMessage: String?
 
+    @State private var googleSignInInProgress = false
+    @State private var googleSignInError: String?
+
     private struct CalendarSourceGroup: Identifiable {
         let title: String
-        let calendars: [CalendarManager.AvailableCalendar]
+        let calendars: [AvailableCalendar]
 
         var id: String { title }
     }
@@ -25,12 +28,11 @@ struct CalendarSettingsTab: View {
                 accessCard
 
                 if settings.calendarIntegrationEnabled {
-                    switch accessState {
-                    case .authorized:
+                    googleCalendarCard
+
+                    if accessState == .authorized {
                         calendarsCard
                         cloudSharingCard
-                    case .denied, .notDetermined:
-                        EmptyView()
                     }
                 }
             }
@@ -53,6 +55,10 @@ struct CalendarSettingsTab: View {
             refreshTick &+= 1
         }
         .onChange(of: settings.excludedCalendarIDs) {
+            refreshTick &+= 1
+        }
+        .onChange(of: settings.googleCalendarEnabled) {
+            container.updateGoogleCalendarIntegration(settings: settings)
             refreshTick &+= 1
         }
     }
@@ -84,7 +90,7 @@ struct CalendarSettingsTab: View {
     private var calendarGroups: [CalendarSourceGroup] {
         var groups: [CalendarSourceGroup] = []
         var currentTitle: String?
-        var currentCalendars: [CalendarManager.AvailableCalendar] = []
+        var currentCalendars: [AvailableCalendar] = []
 
         for calendar in availableCalendars {
             let title = calendar.sourceTitle ?? "Other"
@@ -142,6 +148,137 @@ struct CalendarSettingsTab: View {
             }
 
             accessDetail
+        }
+    }
+
+    private var isGoogleConnected: Bool {
+        container.calendarManager?.connectedGoogleSource?.accessState == .authorized
+    }
+
+    private var googleAccountEmail: String? {
+        container.calendarManager?.connectedGoogleSource?.accountEmail
+    }
+
+    private var googleCalendarCard: some View {
+        settingsCard {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Google Calendar")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Sign in to include Google Calendar events alongside macOS Calendar.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Toggle("Use Google Calendar", isOn: $settings.googleCalendarEnabled)
+                .font(.system(size: 12))
+
+            if settings.googleCalendarEnabled {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("OAuth Client (Desktop app)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Create a Desktop OAuth client in Google Cloud Console and paste the credentials here. See the README for the step-by-step setup.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        Text("Client ID")
+                            .font(.system(size: 11))
+                            .frame(width: 88, alignment: .trailing)
+                        TextField("123…apps.googleusercontent.com", text: $settings.googleOAuthClientID)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .disabled(isGoogleConnected)
+                    }
+                    HStack(spacing: 8) {
+                        Text("Client secret")
+                            .font(.system(size: 11))
+                            .frame(width: 88, alignment: .trailing)
+                        SecureField("GOCSPX-…", text: $settings.googleOAuthClientSecret)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                            .disabled(isGoogleConnected)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    if isGoogleConnected {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Connected")
+                                    .font(.system(size: 12, weight: .medium))
+                                if let email = googleAccountEmail {
+                                    Text(email)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        Spacer()
+                        Button("Disconnect", role: .destructive) {
+                            container.disconnectGoogleCalendar()
+                            googleSignInError = nil
+                            refreshTick &+= 1
+                        }
+                        .font(.system(size: 12))
+                    } else {
+                        if googleSignInInProgress {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Waiting for browser sign-in…")
+                                .font(.system(size: 12))
+                        } else {
+                            Spacer()
+                        }
+                        Spacer()
+                        Button("Connect Google Account") {
+                            connectGoogleCalendar()
+                        }
+                        .font(.system(size: 12))
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            googleSignInInProgress
+                                || settings.googleOAuthClientID.isEmpty
+                                || settings.googleOAuthClientSecret.isEmpty
+                        )
+                    }
+                }
+
+                if let googleSignInError {
+                    Text(googleSignInError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+
+                if isGoogleConnected {
+                    Text("OpenOats fetches events for the next 7 days from your selected Google calendars. Refreshes every 5 minutes while the app is running.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func connectGoogleCalendar() {
+        googleSignInError = nil
+        googleSignInInProgress = true
+        Task { @MainActor in
+            let success = await container.connectGoogleCalendar(settings: settings)
+            googleSignInInProgress = false
+            if !success {
+                googleSignInError = "Sign-in failed. Check that the client ID and secret are correct and that you approved access in the browser."
+            }
+            refreshTick &+= 1
         }
     }
 
@@ -407,7 +544,7 @@ struct CalendarSettingsTab: View {
         }
     }
 
-    private func calendarColor(for calendar: CalendarManager.AvailableCalendar) -> Color {
+    private func calendarColor(for calendar: AvailableCalendar) -> Color {
         guard let hex = calendar.colorHex,
               let color = Color(calendarHex: hex) else { return .secondary }
         return color

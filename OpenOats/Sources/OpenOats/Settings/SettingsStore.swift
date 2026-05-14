@@ -813,6 +813,55 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - Google Calendar
+
+    @ObservationIgnored nonisolated(unsafe) private var _googleCalendarEnabled: Bool
+    var googleCalendarEnabled: Bool {
+        get { access(keyPath: \.googleCalendarEnabled); return _googleCalendarEnabled }
+        set {
+            withMutation(keyPath: \.googleCalendarEnabled) {
+                _googleCalendarEnabled = newValue
+                defaults.set(newValue, forKey: "googleCalendarEnabled")
+            }
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _googleOAuthClientID: String
+    var googleOAuthClientID: String {
+        get {
+            access(keyPath: \.googleOAuthClientID)
+            return loadSecretIfNeeded(key: "googleOAuthClientID", currentValue: _googleOAuthClientID) {
+                _googleOAuthClientID = $0
+            }
+        }
+        set {
+            withMutation(keyPath: \.googleOAuthClientID) {
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                _googleOAuthClientID = trimmed
+                markSecretLoaded("googleOAuthClientID")
+                secretStore.save(key: "googleOAuthClientID", value: trimmed)
+            }
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) private var _googleOAuthClientSecret: String
+    var googleOAuthClientSecret: String {
+        get {
+            access(keyPath: \.googleOAuthClientSecret)
+            return loadSecretIfNeeded(key: "googleOAuthClientSecret", currentValue: _googleOAuthClientSecret) {
+                _googleOAuthClientSecret = $0
+            }
+        }
+        set {
+            withMutation(keyPath: \.googleOAuthClientSecret) {
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                _googleOAuthClientSecret = trimmed
+                markSecretLoaded("googleOAuthClientSecret")
+                secretStore.save(key: "googleOAuthClientSecret", value: trimmed)
+            }
+        }
+    }
+
     // MARK: - Privacy Settings
 
     @ObservationIgnored nonisolated(unsafe) private var _hasAcknowledgedRecordingConsent: Bool
@@ -1369,6 +1418,9 @@ final class SettingsStore {
         self._excludedCalendarIDs = Self.normalizedIdentifierList(
             defaults.stringArray(forKey: "excludedCalendarIDs") ?? []
         )
+        self._googleCalendarEnabled = defaults.bool(forKey: "googleCalendarEnabled")
+        self._googleOAuthClientID = ""
+        self._googleOAuthClientSecret = ""
 
         // Privacy Settings
         self._hasAcknowledgedRecordingConsent = defaults.bool(forKey: "hasAcknowledgedRecordingConsent")
