@@ -397,6 +397,12 @@ private struct TranscriptionSettingsTab: View {
                     Text("Reduces duplicate transcription when using speakers and microphone simultaneously. Currently disabled during recording because it conflicts with system audio capture on macOS.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+
+                    Toggle("Auto-stop at end of calendar meeting", isOn: $settings.autoStopAtMeetingEndEnabled)
+                        .font(.system(size: 12))
+                    Text("After a calendar event's scheduled end time, stops the recording once the room has been silent for a minute. Meetings that run over keep recording until conversation winds down.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Transcription") {

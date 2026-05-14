@@ -292,6 +292,10 @@ final class AppCoordinator {
                             controller.startAppExitMonitoring(bundleID: app.bundleID)
                         }
                     }
+                    if let calEvent = metadata.calendarEvent,
+                       self.activeSettings?.autoStopAtMeetingEndEnabled == true {
+                        controller.startMeetingEndMonitoring(endDate: calEvent.endDate)
+                    }
                     self.handle(.userStarted(metadata), settings: self.activeSettings)
                 case .meetingAppExited:
                     if case .recording(let meta) = self.state {
@@ -308,10 +312,12 @@ final class AppCoordinator {
                         if case .appLaunched = signal {
                             controller.stopSilenceMonitoring()
                             controller.stopAppExitMonitoring()
+                            controller.stopMeetingEndMonitoring()
                             self.handle(.userStopped)
                         } else if case .cameraActivated = signal {
                             controller.stopSilenceMonitoring()
                             controller.stopAppExitMonitoring()
+                            controller.stopMeetingEndMonitoring()
                             self.handle(.userStopped)
                         }
                     }
@@ -319,12 +325,21 @@ final class AppCoordinator {
                     if case .recording = self.state {
                         controller.stopSilenceMonitoring()
                         controller.stopAppExitMonitoring()
+                        controller.stopMeetingEndMonitoring()
                         self.handle(.userStopped)
                     }
                 case .systemSleep:
                     if case .recording = self.state {
                         controller.stopSilenceMonitoring()
                         controller.stopAppExitMonitoring()
+                        controller.stopMeetingEndMonitoring()
+                        self.handle(.userStopped)
+                    }
+                case .calendarEndReached:
+                    if case .recording = self.state {
+                        controller.stopSilenceMonitoring()
+                        controller.stopAppExitMonitoring()
+                        controller.stopMeetingEndMonitoring()
                         self.handle(.userStopped)
                     }
                 case .notAMeeting, .dismissed, .timeout:

@@ -234,4 +234,87 @@ final class MeetingDetectionControllerTests: XCTestCase {
 
         consumeTask.cancel()
     }
+
+    // MARK: - Calendar End Monitoring
+
+    func testMeetingEndMonitorFiresAfterScheduledEndAndSilence() async throws {
+        let controller = MeetingDetectionController()
+        controller.meetingEndSilenceThreshold = 0.05
+        controller.meetingEndPollInterval = 0.05
+
+        var receivedEvent: DetectionEvent?
+        let consumeTask = Task { @MainActor in
+            for await event in controller.events {
+                receivedEvent = event
+                break
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Scheduled end already in the past — monitor jumps straight to silence check.
+        controller.startMeetingEndMonitoring(endDate: Date().addingTimeInterval(-0.01))
+
+        // Wait long enough for one full poll cycle (sleep + check).
+        try await Task.sleep(for: .milliseconds(250))
+
+        if case .calendarEndReached = receivedEvent {
+            // expected
+        } else {
+            XCTFail("Expected .calendarEndReached, got \(String(describing: receivedEvent))")
+        }
+
+        consumeTask.cancel()
+    }
+
+    func testMeetingEndMonitorDoesNotFireWhileUtterancesArrive() async throws {
+        let controller = MeetingDetectionController()
+        controller.meetingEndSilenceThreshold = 0.5
+        controller.meetingEndPollInterval = 0.05
+
+        var receivedEvent: DetectionEvent?
+        let consumeTask = Task { @MainActor in
+            for await event in controller.events {
+                receivedEvent = event
+                break
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        controller.startMeetingEndMonitoring(endDate: Date().addingTimeInterval(-0.01))
+
+        // Keep "talking" — reset silence timer every 50ms for 300ms total. Since
+        // 300ms < the 500ms silence threshold, the event must not fire yet.
+        for _ in 0..<6 {
+            controller.noteUtterance()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        XCTAssertNil(receivedEvent, "Event fired despite ongoing utterances")
+
+        controller.stopMeetingEndMonitoring()
+        consumeTask.cancel()
+    }
+
+    func testStopMeetingEndMonitoringPreventsEvent() async throws {
+        let controller = MeetingDetectionController()
+        controller.meetingEndSilenceThreshold = 0.05
+        controller.meetingEndPollInterval = 0.05
+
+        var receivedEvent: DetectionEvent?
+        let consumeTask = Task { @MainActor in
+            for await event in controller.events {
+                receivedEvent = event
+                break
+            }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        controller.startMeetingEndMonitoring(endDate: Date().addingTimeInterval(-0.01))
+        controller.stopMeetingEndMonitoring()
+
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertNil(receivedEvent)
+        consumeTask.cancel()
+    }
 }

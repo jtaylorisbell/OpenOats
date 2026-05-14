@@ -746,6 +746,17 @@ final class SettingsStore {
         }
     }
 
+    @ObservationIgnored nonisolated(unsafe) private var _autoStopAtMeetingEndEnabled: Bool
+    var autoStopAtMeetingEndEnabled: Bool {
+        get { access(keyPath: \.autoStopAtMeetingEndEnabled); return _autoStopAtMeetingEndEnabled }
+        set {
+            withMutation(keyPath: \.autoStopAtMeetingEndEnabled) {
+                _autoStopAtMeetingEndEnabled = newValue
+                defaults.set(newValue, forKey: "autoStopAtMeetingEndEnabled")
+            }
+        }
+    }
+
     @ObservationIgnored nonisolated(unsafe) private var _diagnosticLoggingEnabled: Bool
     var diagnosticLoggingEnabled: Bool {
         get { access(keyPath: \.diagnosticLoggingEnabled); return _diagnosticLoggingEnabled }
@@ -1410,6 +1421,8 @@ final class SettingsStore {
         self._silenceTimeoutMinutes = defaults.object(forKey: "silenceTimeoutMinutes") != nil
             ? defaults.integer(forKey: "silenceTimeoutMinutes") : 15
         self._detectionLogEnabled = defaults.bool(forKey: "detectionLogEnabled")
+        self._autoStopAtMeetingEndEnabled = defaults.object(forKey: "autoStopAtMeetingEndEnabled") != nil
+            ? defaults.bool(forKey: "autoStopAtMeetingEndEnabled") : true
         self._diagnosticLoggingEnabled = defaults.bool(forKey: "diagnosticLoggingEnabled")
         self._hasShownAutoDetectExplanation = defaults.bool(forKey: "hasShownAutoDetectExplanation")
         self._hasShownCameraDetectExplanation = defaults.bool(forKey: "hasShownCameraDetectExplanation")

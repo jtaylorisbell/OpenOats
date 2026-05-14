@@ -11,6 +11,7 @@ enum DetectionEvent: Sendable {
     case meetingAppExited
     case silenceTimeout
     case systemSleep
+    case calendarEndReached
 }
 
 struct DetectionSnapshot: Sendable {
@@ -72,6 +73,18 @@ final class MeetingDetectionController {
 
     /// Task polling for meeting app process exit during recording.
     private var appExitMonitorTask: Task<Void, Never>?
+
+    /// Task that auto-stops the session after a calendar event's scheduled end,
+    /// once the room has been silent long enough to indicate the meeting really ended.
+    private var meetingEndMonitorTask: Task<Void, Never>?
+
+    /// Seconds of silence required past a calendar event's scheduled end before
+    /// auto-stopping. Internal so tests can shorten it.
+    var meetingEndSilenceThreshold: TimeInterval = 60
+
+    /// Polling cadence (seconds) used after the scheduled end to check for silence.
+    /// Internal so tests can shorten it.
+    var meetingEndPollInterval: TimeInterval = 15
 
     /// Observer token for system sleep notifications.
     private var sleepObserver: Any?
@@ -208,6 +221,9 @@ final class MeetingDetectionController {
         appExitMonitorTask?.cancel()
         appExitMonitorTask = nil
 
+        meetingEndMonitorTask?.cancel()
+        meetingEndMonitorTask = nil
+
         Task {
             await meetingDetector?.stop()
         }
@@ -325,6 +341,55 @@ final class MeetingDetectionController {
     func stopAppExitMonitoring() {
         appExitMonitorTask?.cancel()
         appExitMonitorTask = nil
+    }
+
+    // MARK: - Calendar Event End Monitor
+
+    /// Start watching for a calendar event's scheduled end time. After the end
+    /// time has passed, auto-stops the session once the room has been silent
+    /// for `meetingEndSilenceThreshold` seconds — so meetings that run over
+    /// keep recording until conversation actually winds down.
+    func startMeetingEndMonitoring(endDate: Date) {
+        meetingEndMonitorTask?.cancel()
+
+        // Seed the silence timer if no utterance has been observed yet, so the
+        // monitor has a reference point for the silence-after-end check.
+        if lastUtteranceAt == nil {
+            lastUtteranceAt = Date()
+        }
+
+        meetingEndMonitorTask = Task { [weak self] in
+            // Phase 1: wait until the scheduled end. Sleep in <= 30s chunks so
+            // cancellation stays responsive even for long meetings.
+            while !Task.isCancelled {
+                let remaining = endDate.timeIntervalSinceNow
+                if remaining <= 0 { break }
+                try? await Task.sleep(for: .seconds(min(remaining, 30)))
+            }
+
+            // Phase 2: poll for silence after the scheduled end.
+            while !Task.isCancelled {
+                guard let self else { break }
+                let threshold = self.meetingEndSilenceThreshold
+                if let lastUtterance = self.lastUtteranceAt {
+                    let silentFor = Date().timeIntervalSince(lastUtterance)
+                    if silentFor >= threshold {
+                        if self.activeSettings?.detectionLogEnabled == true {
+                            Log.meetingDetection.info("Calendar event ended and silent for \(Int(silentFor), privacy: .public)s, auto-stopping")
+                        }
+                        self.eventContinuation.yield(.calendarEndReached)
+                        return
+                    }
+                }
+                try? await Task.sleep(for: .seconds(self.meetingEndPollInterval))
+            }
+        }
+    }
+
+    /// Stop the calendar-end monitor (e.g. when session ends or user stops manually).
+    func stopMeetingEndMonitoring() {
+        meetingEndMonitorTask?.cancel()
+        meetingEndMonitorTask = nil
     }
 
     // MARK: - Evaluate Immediate

@@ -296,6 +296,10 @@ final class LiveSessionController {
         pendingInitialScratchpad = initialScratchpad?.trimmingCharacters(in: .newlines)
         let metadata = MeetingMetadata.manual(calendarEvent: calEvent)
 
+        if let calEvent, settings.autoStopAtMeetingEndEnabled {
+            container.detectionController?.startMeetingEndMonitoring(endDate: calEvent.endDate)
+        }
+
         if settings.transcriptionModel.isCloud {
             state.errorMessage = nil
             state.statusMessage = "Validating \(settings.transcriptionModel.displayName)..."
@@ -317,6 +321,7 @@ final class LiveSessionController {
 
     func stopSession(settings: AppSettings) {
         DiagnosticsSupport.record(category: "meeting", message: "Stop requested")
+        container.detectionController?.stopMeetingEndMonitoring()
         coordinator.handle(.userStopped, settings: settings)
     }
 
