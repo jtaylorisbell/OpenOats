@@ -44,28 +44,29 @@ private struct GoogleTokenBundle: Codable {
     var email: String?
 }
 
-/// Persistent storage interface for Google tokens. Production uses the Keychain; tests inject a mock.
+/// Persistent storage interface for Google tokens. Production uses the file-backed
+/// secret store; tests inject a mock.
 protocol GoogleOAuthStorage: Sendable {
     func loadTokens() -> Data?
     func saveTokens(_ data: Data)
     func deleteTokens()
 }
 
-struct KeychainGoogleOAuthStorage: GoogleOAuthStorage {
+struct FileGoogleOAuthStorage: GoogleOAuthStorage {
     static let key = "googleCalendarOAuthTokens"
 
     func loadTokens() -> Data? {
-        guard let stringValue = KeychainHelper.load(key: Self.key) else { return nil }
+        guard let stringValue = FileSecretStore.load(key: Self.key) else { return nil }
         return stringValue.data(using: .utf8)
     }
 
     func saveTokens(_ data: Data) {
         guard let stringValue = String(data: data, encoding: .utf8) else { return }
-        KeychainHelper.save(key: Self.key, value: stringValue)
+        FileSecretStore.save(key: Self.key, value: stringValue)
     }
 
     func deleteTokens() {
-        KeychainHelper.delete(key: Self.key)
+        FileSecretStore.delete(key: Self.key)
     }
 }
 
@@ -91,7 +92,7 @@ final class GoogleOAuthClient {
     init(
         clientID: String,
         clientSecret: String,
-        storage: GoogleOAuthStorage = KeychainGoogleOAuthStorage(),
+        storage: GoogleOAuthStorage = FileGoogleOAuthStorage(),
         urlSession: URLSession = .shared
     ) {
         self.clientID = clientID

@@ -13,10 +13,15 @@ struct AppSecretStore: Sendable {
         saveValue(key, value)
     }
 
-    static let keychain = AppSecretStore(
-        loadValue: { KeychainHelper.load(key: $0) },
+    /// File-backed store at `~/Library/Application Support/OpenOats/secrets.json`
+    /// (file mode 0600). Replaces the previous Keychain-backed store — Keychain's
+    /// ACL prompts on every unsigned-build launch were unworkable for local dev.
+    /// Plain JSON is fine in practice: FileVault encrypts at rest, and 0600 keeps
+    /// other Unix users on the same Mac out.
+    static let fileBacked = AppSecretStore(
+        loadValue: { FileSecretStore.load(key: $0) },
         saveValue: { key, value in
-            KeychainHelper.save(key: key, value: value)
+            FileSecretStore.save(key: key, value: value)
         }
     )
 
@@ -35,7 +40,7 @@ struct SettingsStorage {
     static func live(defaults: UserDefaults = .standard) -> SettingsStorage {
         SettingsStorage(
             defaults: defaults,
-            secretStore: .keychain,
+            secretStore: .fileBacked,
             defaultNotesDirectory: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Documents/OpenOats"),
             runMigrations: true
@@ -46,59 +51,69 @@ struct SettingsStorage {
 /// Backward-compatible alias for existing test code.
 typealias AppSettingsStorage = SettingsStorage
 
-// MARK: - Keychain Helper
+// MARK: - File-Backed Secret Store
 
-enum KeychainHelper {
-    private static let service = "com.openoats.app"
+enum FileSecretStore {
+    private static let directoryName = "OpenOats"
+    private static let fileName = "secrets.json"
+    private static let lock = NSLock()
 
-    static func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
-        delete(key: key)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-        ]
-
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    static func saveIfMissing(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-        ]
-
-        SecItemAdd(query as CFDictionary, nil)
+    static var fileURL: URL {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        let dir = appSupport.appendingPathComponent(directoryName, isDirectory: true)
+        return dir.appendingPathComponent(fileName, isDirectory: false)
     }
 
     static func load(key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        lock.lock(); defer { lock.unlock() }
+        return readDict()[key]
+    }
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+    static func save(key: String, value: String) {
+        lock.lock(); defer { lock.unlock() }
+        var dict = readDict()
+        dict[key] = value
+        writeDict(dict)
     }
 
     static func delete(key: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-        ]
-        SecItemDelete(query as CFDictionary)
+        lock.lock(); defer { lock.unlock() }
+        var dict = readDict()
+        guard dict.removeValue(forKey: key) != nil else { return }
+        writeDict(dict)
+    }
+
+    private static func readDict() -> [String: String] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return dict
+    }
+
+    private static func writeDict(_ dict: [String: String]) {
+        let url = fileURL
+        let dir = url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: dir,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+            let data = try encoder.encode(dict)
+            try data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: url.path
+            )
+        } catch {
+            // Match the prior Keychain helper's swallow-on-failure behavior.
+        }
     }
 }

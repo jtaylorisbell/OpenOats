@@ -1301,7 +1301,7 @@ final class SettingsStore {
         if storage.runMigrations {
             Self.migrateFromOldBundleIfNeeded(defaults: defaults)
             Self.migrateFromOpenGranolaIfNeeded(defaults: defaults)
-            Self.migrateKeychainServiceIfNeeded(defaults: defaults)
+            Self.migrateSecretsToFileIfNeeded(defaults: defaults)
         }
 
         // Migrate renamed settings keys (old -> new)
@@ -1721,9 +1721,9 @@ extension SettingsStore {
         let oldService = "com.onthespot.app"
         let keychainKeys = ["openRouterApiKey", "voyageApiKey"]
         for key in keychainKeys {
-            if let oldValue = Self.loadKeychain(service: oldService, key: key) {
-                KeychainHelper.saveIfMissing(key: key, value: oldValue)
-            }
+            guard FileSecretStore.load(key: key) == nil,
+                  let oldValue = Self.loadKeychain(service: oldService, key: key) else { continue }
+            FileSecretStore.save(key: key, value: oldValue)
         }
     }
 
@@ -1754,9 +1754,9 @@ extension SettingsStore {
         let oldService = "com.opengranola.app"
         let keychainKeys = ["openRouterApiKey", "voyageApiKey"]
         for key in keychainKeys {
-            if let oldValue = Self.loadKeychain(service: oldService, key: key) {
-                KeychainHelper.saveIfMissing(key: key, value: oldValue)
-            }
+            guard FileSecretStore.load(key: key) == nil,
+                  let oldValue = Self.loadKeychain(service: oldService, key: key) else { continue }
+            FileSecretStore.save(key: key, value: oldValue)
         }
 
         migrateFilesFromOpenGranola(defaults: defaults)
@@ -1822,20 +1822,46 @@ extension SettingsStore {
         }
     }
 
-    /// Migrate keychain entries from the old "com.opengranola.app" service to the
-    /// current "com.openoats.app" service.
-    private static func migrateKeychainServiceIfNeeded(defaults: UserDefaults) {
-        let migrationKey = "didMigrateKeychainToOpenOats"
+    /// One-time migration of stored secrets from macOS Keychain to the new
+    /// file-backed store at `~/Library/Application Support/OpenOats/secrets.json`.
+    ///
+    /// Unsigned local builds re-prompt for Keychain access on every launch (the
+    /// app's ad-hoc signature changes per build), which made Keychain unusable
+    /// for development. Reads from both the current "com.openoats.app" service
+    /// and the legacy "com.opengranola.app" service so users on either history
+    /// land in the same place. Skips keys already present in the file store.
+    private static func migrateSecretsToFileIfNeeded(defaults: UserDefaults) {
+        let migrationKey = "didMigrateSecretsToFile"
         guard !defaults.bool(forKey: migrationKey) else { return }
-        defer { defaults.set(true, forKey: migrationKey) }
 
-        let oldService = "com.opengranola.app"
-        let keychainKeys = ["openRouterApiKey", "voyageApiKey", "openAIEmbedApiKey", "openAILLMApiKey"]
-        for key in keychainKeys {
-            if let oldValue = loadKeychain(service: oldService, key: key) {
-                KeychainHelper.saveIfMissing(key: key, value: oldValue)
+        let knownKeys = [
+            "openRouterApiKey",
+            "assemblyAIApiKey",
+            "elevenLabsApiKey",
+            "openAILLMApiKey",
+            "databricksClientID",
+            "databricksClientSecret",
+            "openAIEmbedApiKey",
+            "voyageApiKey",
+            "googleOAuthClientID",
+            "googleOAuthClientSecret",
+            "granolaApiKey",
+            "webhookSecret",
+            "googleCalendarOAuthTokens",
+        ]
+        let services = ["com.openoats.app", "com.opengranola.app"]
+
+        for key in knownKeys {
+            guard FileSecretStore.load(key: key) == nil else { continue }
+            for service in services {
+                if let value = loadKeychain(service: service, key: key) {
+                    FileSecretStore.save(key: key, value: value)
+                    break
+                }
             }
         }
+
+        defaults.set(true, forKey: migrationKey)
     }
 
     /// Read a keychain entry from a specific service (used for migration only).
