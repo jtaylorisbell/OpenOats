@@ -98,20 +98,12 @@ echo "App bundle created: $APP_DIR"
 if [[ "$SKIP_SIGN" == "1" ]]; then
   echo "Skipping code signing"
 else
-  # Auto-detect signing identity if not set. Search order:
-  #   1. Developer ID Application — production / distribution.
-  #   2. Apple Development        — Xcode-issued dev identity.
-  #   3. OpenOats Dev             — self-signed local dev cert. Lets you sign
-  #      your local builds with a stable identity so macOS Keychain doesn't
-  #      re-prompt for password on every rebuild. See scripts/README or the
-  #      onboarding notes for how to create one in Keychain Access.
+  # Auto-detect signing identity if not set
   if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
-    for IDENTITY_PATTERN in "Developer ID Application" "Apple Development" "OpenOats Dev"; do
-      CODESIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "$IDENTITY_PATTERN" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
-      if [[ -n "$CODESIGN_IDENTITY" ]]; then
-        break
-      fi
-    done
+    CODESIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+    if [[ -z "$CODESIGN_IDENTITY" ]]; then
+      CODESIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
+    fi
   fi
 
   # Sign the app
